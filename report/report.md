@@ -50,7 +50,7 @@
 
 | 成员 | AI 编程工具 | 底层模型 | 备注 |
 |------|------------|---------|------|
-| 2412771-谭锦睿 | OpenCode、ChatGPT | OpenCode：DeepSeek-V4-Flash-Vision-Exp；ChatGPT：GPT-5.6 Sol | 主要用于代码分析、环境问题定位、提示词设计、实验过程复核和报告整合 |
+| 2412771-谭锦睿 | OpenCode、ChatGPT | OpenCode：DeepSeek-V4-Flash-Vision-Exp；ChatGPT：GPT-5.6 Sol | 主要用于代码分析、环境问题定位、实验过程复核和报告整合 |
 | 2413581-黄奕浩 | ChatGPT | ChatGPT：GPT-6.1 Sol | 负责练习1内容整理与复核 |
 | 2411302-王乐之 | Codex | GPT-6.1 Sol | 负责练习2调试过程整理与复核 |
 
