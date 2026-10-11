@@ -112,16 +112,16 @@ BASE_ADDRESS = 0x80200000;
 
 本实验按照下面的顺序完成：
 
-1. **先完成编译与链接**  
+1、**先完成编译与链接**  
    通过 `make` 生成 `bin/kernel` 和 `bin/ucore.img`，保证后续 QEMU 和 GDB 有可以运行和调试的内核产物。
 
-2. **再验证 QEMU/OpenSBI 能否进入 uCore**  
+2、**再验证 QEMU/OpenSBI 能否进入 uCore**  
    通过 `make qemu` 检查 OpenSBI 的 `Domain0 Next Address` 和内核输出。当前环境下原有 Makefile 启动方式无法正确进入内核，因此先通过手工命令定位问题，再对 Makefile 做最小修改。
 
-3. **理解 `kern_entry` 的作用**  
+3、**理解 `kern_entry` 的作用**  
    分析 `entry.S` 中的 `la sp, bootstacktop` 和 `tail kern_init`，弄清楚进入 C 语言代码之前为什么必须先准备内核栈。
 
-4. **最后用 GDB 验证整个启动流程**  
+4、**最后用 GDB 验证整个启动流程**  
    从 `0x1000` 开始观察启动指令，再在 `0x80200000` 设置断点，验证 OpenSBI 将控制权交给内核，并进一步单步执行到 `kern_init()`。
 
 这种顺序先保证“能运行”，再分析“为什么能运行”，最后用调试器验证实际行为，使静态代码分析和动态执行结果能够相互对应。
@@ -225,11 +225,11 @@ Domain0 Next Address : 0x0000000080200000
 
 修改后需要保证：
 
-- `qemu` 使用 `-kernel $(UCOREIMG)` 启动内核；
-- `debug` 也使用 `-kernel $(UCOREIMG)`；
-- `debug` 保留 `-s -S`，供 GDB 连接并在启动时暂停 CPU；
-- `gdb` 目标保持不变；
-- 不修改其他无关内容。
+1、`qemu` 使用 `-kernel $(UCOREIMG)` 启动内核；
+2、`debug` 也使用 `-kernel $(UCOREIMG)`；
+3、`debug` 保留 `-s -S`，供 GDB 连接并在启动时暂停 CPU；
+4、`gdb` 目标保持不变；
+5、不修改其他无关内容。
 
 [SPECIFICATION]
 
@@ -288,16 +288,16 @@ debug:
 
 重新执行 `make qemu` 后：
 
-- ✅ `Domain0 Next Address` 为 `0x80200000`
-- ✅ uCore 成功输出 `(THU.CST) os is loading ...`
-- ✅ `make debug` 仍可以通过 1234 端口供 GDB 连接
-- ✅ 没有修改无关内核代码
+-  `Domain0 Next Address` 为 `0x80200000`
+-  uCore 成功输出 `(THU.CST) os is loading ...`
+-  `make debug` 仍可以通过 1234 端口供 GDB 连接
+-  没有修改无关内核代码
 
 **关键改进点总结：**
 
-1. 在提示词的 `[RELY]` 中提供了真实失败输出和已经验证成功的手工命令；
-2. 在 `[GUARANTEE]` 中限制修改范围，避免 AI 改动其他目标；
-3. 修改后通过 `git diff` 和真实 QEMU 运行结果进行二次验证。
+1、在提示词的 `[RELY]` 中提供了真实失败输出和已经验证成功的手工命令；
+2、在 `[GUARANTEE]` 中限制修改范围，避免 AI 改动其他目标；
+3、修改后通过 `git diff` 和真实 QEMU 运行结果进行二次验证。
 
 ![OpenSBI 启动信息](./images/image1.png)
 
@@ -335,8 +335,8 @@ code/tools/kernel.ld
 
 **任务**：阅读 `code/kern/init/entry.S`，结合相关代码完成 Lab1 练习1，解释：
 
-1. `la sp, bootstacktop` 完成了什么操作，目的是什么；
-2. `tail kern_init` 完成了什么操作，目的是什么。
+1、`la sp, bootstacktop` 完成了什么操作，目的是什么；
+2、`tail kern_init` 完成了什么操作，目的是什么。
 
 **操作要求**：基于当前项目真实代码分析，不修改任何文件。
 
@@ -378,11 +378,11 @@ int kern_init(void) __attribute__((noreturn));
 
 需要回答：
 
-- `la sp, bootstacktop` 的作用和目的；
-- `tail kern_init` 的作用和目的；
-- `bootstack`、`bootstacktop` 和 `sp` 的关系；
-- `KSTACKSIZE` 的实际大小；
-- 为什么 `kern_init` 不需要返回到 `kern_entry`。
+1、`la sp, bootstacktop` 的作用和目的；
+2、`tail kern_init` 的作用和目的；
+3、`bootstack`、`bootstacktop` 和 `sp` 的关系；
+4、`KSTACKSIZE` 的实际大小；
+5、为什么 `kern_init` 不需要返回到 `kern_entry`。
 
 不修改任何源码。
 
@@ -477,10 +477,10 @@ int kern_init(void) __attribute__((noreturn));
 
 **最终结果：**
 
-- ✅ 正确计算启动栈大小为 8 KiB
-- ✅ 明确 `sp`、`bootstack` 和 `bootstacktop` 的关系
-- ✅ 解释了 `tail kern_init` 与 `noreturn` 的关系
-- ✅ 使用 GDB 观察到 `sp` 实际变为 `0x80203000`
+1、正确计算启动栈大小为 8 KiB
+2、明确 `sp`、`bootstack` 和 `bootstacktop` 的关系
+3、解释了 `tail kern_init` 与 `noreturn` 的关系
+4、使用 GDB 观察到 `sp` 实际变为 `0x80203000`
 
 ![GDB 单步验证内核栈初始化](./images/image4.png)
 
@@ -502,10 +502,10 @@ int kern_init(void) __attribute__((noreturn));
 **任务**：分析当前 Lab1 的 GDB 调试方式，告诉我如何完成练习2：从 CPU 加电开始调试，观察最初执行地址，并最终跟踪到内核入口 `0x80200000`。
 
 **操作要求**：
-- 阅读当前项目中的 `code/Makefile`、`code/tools/kernel.ld` 和 `code/kern/init/entry.S`。
-- 不修改任何文件。
-- 不执行 commit 或 push。
-- 只分析当前项目真实的 `debug` 和 `gdb` 目标。
+1、阅读当前项目中的 `code/Makefile`、`code/tools/kernel.ld` 和 `code/kern/init/entry.S`。
+2、不修改任何文件。
+3、不执行 commit 或 push。
+4、只分析当前项目真实的 `debug` 和 `gdb` 目标。
 
 **输出要求**：
 给出两个终端分别应该执行什么命令，并解释主要 GDB 命令的作用。
@@ -543,13 +543,13 @@ Domain0 Next Address : 0x0000000080200000
 
 需要说明：
 
-1. 终端1如何启动 QEMU 调试模式；
-2. 终端2如何启动 GDB；
-3. 如何查看当前 PC；
-4. 如何查看当前地址附近的汇编指令；
-5. 如何设置 `0x80200000` 断点；
-6. 如何继续运行直到内核入口；
-7. 如何确认当前已经进入 `kern_entry`。
+1、终端1如何启动 QEMU 调试模式；
+2、终端2如何启动 GDB；
+3、如何查看当前 PC；
+4、如何查看当前地址附近的汇编指令；
+5、如何设置 `0x80200000` 断点；
+6、如何继续运行直到内核入口；
+7、如何确认当前已经进入 `kern_entry`。
 
 不修改任何代码。
 
@@ -717,12 +717,12 @@ kern_init()
 
 **最终结果：**
 
-- ✅ 确认 CPU 复位地址为 `0x1000`
-- ✅ 查看并解释 `0x1000` 附近的启动代码
-- ✅ 验证 `0x1018` 中保存 `0x80000000`
-- ✅ 在 `0x80200000` 命中 `kern_entry`
-- ✅ 单步观察 `sp` 初始化
-- ✅ 最终进入 `kern_init()`
+1、确认 CPU 复位地址为 `0x1000`
+2、查看并解释 `0x1000` 附近的启动代码
+3、验证 `0x1018` 中保存 `0x80000000`
+4、在 `0x80200000` 命中 `kern_entry`
+5、单步观察 `sp` 初始化
+6、最终进入 `kern_init()`
 
 ---
 
