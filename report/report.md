@@ -477,10 +477,10 @@ int kern_init(void) __attribute__((noreturn));
 
 **最终结果：**
 
-1、正确计算启动栈大小为 8 KiB
-2、明确 `sp`、`bootstack` 和 `bootstacktop` 的关系
-3、解释了 `tail kern_init` 与 `noreturn` 的关系
-4、使用 GDB 观察到 `sp` 实际变为 `0x80203000`
+1. 正确计算启动栈大小为 8 KiB
+2. 明确 `sp`、`bootstack` 和 `bootstacktop` 的关系
+3. 解释了 `tail kern_init` 与 `noreturn` 的关系
+4. 使用 GDB 观察到 `sp` 实际变为 `0x80203000`
 
 ![GDB 单步验证内核栈初始化](./images/image4.png)
 
@@ -717,12 +717,12 @@ kern_init()
 
 **最终结果：**
 
-1、确认 CPU 复位地址为 `0x1000`
-2、查看并解释 `0x1000` 附近的启动代码
-3、验证 `0x1018` 中保存 `0x80000000`
-4、在 `0x80200000` 命中 `kern_entry`
-5、单步观察 `sp` 初始化
-6、最终进入 `kern_init()`
+1. 确认 CPU 复位地址为 `0x1000`
+2. 查看并解释 `0x1000` 附近的启动代码
+3. 验证 `0x1018` 中保存 `0x80000000`
+4. 在 `0x80200000` 命中 `kern_entry`
+5. 单步观察 `sp` 初始化
+6. 最终进入 `kern_init()`
 
 ---
 
