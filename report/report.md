@@ -455,7 +455,7 @@ sp = 0x80203000
 
 这说明 `sp` 确实被切换到了 uCore 的启动栈。
 
-`tail kern_init` 表示直接将控制权交给 `kern_init()`。`kern_init()` 被声明为：
+`tail kern_init` 以尾调用方式跳转到 `kern_init`，不设置返回地址，目的是将控制权从汇编入口交给C函数kern_init，开始执行内核初始化。`kern_init()` 被声明为：
 
 ```c
 int kern_init(void) __attribute__((noreturn));
