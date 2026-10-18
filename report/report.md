@@ -6,7 +6,7 @@
 |---|---|
 | **实验名称** | Lab2：物理内存和页表 |
 | **小组成员** | 2412771-谭锦睿、2413581-黄奕浩、2411302-王乐之 |
-| **完成日期** | 2026-XX-XX |
+| **完成日期** | 2026-10-18 |
 | **实验分支** | `lab2` |
 | **代码目录** | `code/` |
 | **报告目录** | `report/` |
@@ -29,14 +29,14 @@
 根据实验指导书，Lab2 当前需要覆盖的内容如下：
 
 - [x] 功能模块一任务一：实现物理内存探测与页描述符初始化功能 —— 谭锦睿
-- [ ] 功能模块一 Challenge：硬件可用物理内存范围的获取方法 —— 谭锦睿负责思考题整理；Challenge 为选做
-- [ ] 功能模块二任务一：理解 First-Fit 连续物理内存分配算法 —— 谭锦睿
-- [ ] 功能模块二任务二：实现 Best-Fit 连续物理内存分配算法 —— 谭锦睿
-- [ ] 功能模块二任务三：Buddy System 分配算法 —— 黄奕浩
-- [ ] 功能模块二扩展任务 Challenge：任意大小内存单元 SLUB 分配算法 —— 王乐之；Challenge 为选做
-- [ ] 分支任务：GDB 调试页表查询过程 —— 三人共同完成
+- [x] 功能模块一 Challenge：硬件可用物理内存范围的获取方法 —— 谭锦睿
+- [x] 功能模块二任务一：理解 First-Fit 连续物理内存分配算法 —— 谭锦睿
+- [x] 功能模块二任务二：实现 Best-Fit 连续物理内存分配算法 —— 谭锦睿
+- 功能模块二任务三：Buddy System 分配算法 —— 待对应负责人完成后补充。
+- 功能模块二扩展任务 Challenge：任意大小内存单元 SLUB 分配算法 —— 待对应负责人完成后补充。
+- 分支任务：GDB 调试页表查询过程 —— 待三人共同完成后补充。
 
-> 说明：功能模块一 Challenge 与功能模块二 SLUB Challenge 均属于加分项。为避免报告结构遗漏，本报告仍保留对应章节；若最终未完成，应在报告中明确写“未选做”，不要删除任务记录后造成任务覆盖不清。
+Buddy System、SLUB Challenge 与 GDB 页表查询任务尚未完成，相关章节保留供对应负责人后续补充。
 
 ### 报告分工
 
@@ -75,20 +75,22 @@
 |---|---|
 | 主机环境 | Windows + WSL2 Ubuntu 24.04 |
 | 目标架构 | RISC-V 64 |
-| 交叉编译工具链 | `riscv64-unknown-elf-*` |
-| 虚拟机 | QEMU RISC-V `virt` |
-| 固件 | OpenSBI |
+| 交叉编译工具链 | SiFive GCC-Metal 10.2.0（`riscv64-unknown-elf-*`） |
+| 虚拟机 | QEMU 4.1.1，RISC-V `virt` 机器 |
+| 固件 | 课程环境对应的旧版 OpenSBI |
 | 调试工具 | RISC-V GDB |
 | 版本管理 | Git + GitHub |
 | 实验分支 | `lab2` |
+
+实验初期误用了系统 QEMU 8.2.2，导致老师原始启动方式无法正常进入 uCore。后续按照课程要求切换至 QEMU 4.1.1，并恢复老师原始 `Makefile` 和 `entry.S` 后，系统正常运行并通过官方评分。
 
 ## 2.2 AI 工具
 
 | 成员 | AI 编程工具 | 底层模型 | 用途 |
 |---|---|---|---|
-| 2412771-谭锦睿 | [待填写] | [待填写] | 物理内存初始化、First-Fit 分析、Best-Fit Prompt 与代码检查 |
-| 2413581-黄奕浩 | [待填写] | [待填写] | Buddy System 模块与测试 |
-| 2411302-王乐之 | [待填写] | [待填写] | SLUB 模块与测试 |
+| 2412771-谭锦睿 | Codex | GPT-5 | `page_init()` 与 Best-Fit 的 Prompt 设计、源码核对和测试辅助 |
+| 2413581-黄奕浩 | 待对应负责人补充 | — | Buddy System 模块与测试 |
+| 2411302-王乐之 | 待对应负责人补充 | — | SLUB 模块与测试 |
 
 ---
 
@@ -121,14 +123,10 @@ First-Fit 代码阅读与理解
         ↓
 Best-Fit 实现并切换 pmm_manager
         ↓
-Buddy System 扩展实现
-        ↓
-SLUB Challenge
-        ↓
-QEMU / make grade / 自定义测试
-        ↓
-三人共同完成 GDB Sv39 页表查询
+QEMU / make grade 验证
 ```
+
+Buddy System、SLUB Challenge 和 GDB Sv39 页表查询为后续任务，目前不计入已完成的实验主线。
 
 实验指导书给出的核心调用链为：
 
@@ -165,13 +163,13 @@ alloc_pages() / free_pages()
 
 # 四、实验内容与实现
 
-# 4.1 功能模块一：物理内存初始化功能
+## 4.1 功能模块一：物理内存初始化功能
 
-## 4.1.1 任务一：实现物理内存探测与页描述符初始化功能
+### 4.1.1 任务一：实现物理内存探测与页描述符初始化功能
 
 **负责人：2412771-谭锦睿**
 
-### 任务要求
+#### 任务要求
 
 实现：
 
@@ -196,7 +194,7 @@ kern/mm/pmm.c
 7. 将剩余完整物理页通过 `init_memmap()` 交给当前 `pmm_manager`；
 8. 当设备树信息无效时终止初始化；当不存在完整可用页时不调用 `init_memmap()`。
 
-### 主要涉及文件
+#### 主要涉及文件
 
 ```text
 kern/driver/dtb.c
@@ -208,7 +206,7 @@ kern/mm/mmu.h
 tools/kernel.ld
 ```
 
-### 实现思路
+#### 实现思路
 
 当前实现的主要流程为：
 
@@ -238,47 +236,37 @@ init_memmap(pa2page(free_start), free_pages)
 
 当前代码还增加了对无效内存范围、地址加法溢出、描述符数组越界等情况的检查。
 
-### 关键理解
+#### 关键理解
 
 `Page[]` 并不是真实物理页本身，而是“每个物理页对应的一条管理记录”。例如，一个 `Page` 描述符可以记录该物理页是否保留、引用计数、空闲块长度和链表节点。
 
 `Page[]` 本身也存放在实际内存中，所以它占用的物理空间不能再次被交给页面分配器。初始可分配空间必须从描述符数组结束位置之后的下一个完整页开始。
 
-### 最终 Prompt
+#### Prompt 设计
 
-> 此处在最终整理报告时放入实际成功使用的精简版四段式 Prompt。开发阶段使用的完整 Prompt 统一保存在 `report/prompt.md`。
+本任务使用四段式 Prompt 约束修改范围、可依赖接口和最终行为；完整版本见 [`prompt.md`](./prompt.md)。报告中保留的精简版如下：
 
 ```markdown
 [PROMPT]
-实现 kern/mm/pmm.c 中的 page_init()，完成 DTB 物理内存探测结果到 Page 描述符数组和初始空闲页区间的建立，只修改功能模块一相关代码。
+实现 `kern/mm/pmm.c` 中的 `page_init()`，完成从 DTB 内存信息到 `Page[]` 和初始空闲页区间的建立。
 
 [RELY]
-使用当前工程真实的 DTB 接口、struct Page、pages/npage/nbase/va_pa_offset、PADDR/pa2page、PGSIZE、页面对齐宏和 init_memmap()。
+仅使用当前工程真实的 DTB、地址转换、页面对齐、`struct Page` 和 `init_memmap()` 接口。
 
 [GUARANTEE]
-正确设置 va_pa_offset、npage、pages；保留内核和 Page[] 占用区域；只将完整可用页交给当前 pmm_manager。
+不得修改测试；正确设置全局内存管理变量，并排除内核与 `Page[]` 占用区域。
 
 [SPECIFICATION]
-正确处理 DTB 范围、地址转换、页对齐、Page 状态初始化、无效内存范围和不存在完整空闲页等情况。
+初始化页描述符，只将对齐后的完整可用页交给当前 `pmm_manager`，并处理无效范围和边界情况。
 ```
 
-### 当前验证状态
+#### 验证结果
 
-已完成：
-
-- [x] `page_init()` 实现
-- [x] `git diff --check`
-- [x] `pmm.o` 单独编译通过
-- [x] 与 `pmm.h` 中 `pa2page()` / `page2pa()` 的索引关系一致
-- [ ] 完整 Lab2 工程最终运行验证
-- [ ] `[Test 1] Page Init: PASS`
-- [ ] `make grade` 最终验证
-
-> 说明：完整运行验证需要等 Best-Fit 等后续任务接入后统一进行，未完成前不提前填写 PASS。
+`page_init()` 已完成并通过完整工程编译。课程评分脚本注入的 Page Init 测试输出 `[Test 1] Page Init: PASS`，`make grade` 对应检查为 `OK`，最终评分为 20/20。
 
 ---
 
-## 4.1.2 Challenge：硬件的可用物理内存范围的获取方法
+### 4.1.2 Challenge：硬件的可用物理内存范围的获取方法
 
 **负责人：2412771-谭锦睿**
 
@@ -287,7 +275,7 @@ init_memmap(pa2page(free_start), free_pages)
 > 如果 OS 无法提前知道当前硬件的可用物理内存范围，有什么办法让 OS 获取可用物理内存范围？
 
 
-### 最终回答
+#### 最终回答
 
 如果操作系统无法在编译时提前知道机器的物理内存范围，就需要在启动阶段从硬件平台、固件或 Bootloader 获取内存布局信息，而不能直接在内核中写死物理内存大小。
 
@@ -311,17 +299,17 @@ init_memmap(pa2page(free_start), free_pages)
 
 ---
 
-# 4.2 功能模块二：物理内存分配功能
+## 4.2 功能模块二：物理内存分配功能
 
-## 4.2.1 任务一：理解 First-Fit 连续物理内存分配算法
+### 4.2.1 任务一：理解 First-Fit 连续物理内存分配算法
 
 **负责人：2412771-谭锦睿**
 
-### 任务性质
+#### 任务性质
 
 本任务属于代码阅读与思考题，不需要修改源码。主要通过阅读 `kern/mm/default_pmm.c` 中的 `default_init()`、`default_init_memmap()`、`default_alloc_pages()` 和 `default_free_pages()`，理解 First-Fit 连续物理页分配器的初始化、分配、释放以及相邻空闲块合并过程。
 
-### First-Fit 分配器工作过程
+#### First-Fit 分配器工作过程
 
 First-Fit 使用空闲链表 `free_list` 管理连续空闲物理页块，并通过 `nr_free` 记录当前所有空闲物理页的总数。
 
@@ -341,7 +329,7 @@ First-Fit 使用空闲链表 `free_list` 管理连续空闲物理页块，并通
 
 在合并过程中，只是将多个连续空闲块重新组织成一个更大的空闲块，并没有产生新的空闲页面，因此 `nr_free` 只在真正释放 `n` 个页面时增加一次，不会因为后续合并再次增加。
 
-### 原有 First-Fit 算法是否有进一步的改进空间
+#### 原有 First-Fit 算法是否有进一步的改进空间
 
 我认为原有的 First-Fit 算法仍然存在进一步的改进空间。
 
@@ -355,11 +343,11 @@ First-Fit 使用空闲链表 `free_list` 管理连续空闲物理页块，并通
 
 因此，我认为 First-Fit 的主要改进方向是提高空闲块查找效率、优化空闲块选择策略，并采用更加适合快速分割和合并的数据结构。
 
-## 4.2.2 任务二：实现 Best-Fit 连续物理内存分配算法
+### 4.2.2 任务二：实现 Best-Fit 连续物理内存分配算法
 
 **负责人：2412771-谭锦睿**
 
-### 任务要求
+#### 任务要求
 
 本任务要求参考 `kern/mm/default_pmm.c` 中已有的 First-Fit 实现，在 `kern/mm/best_fit_pmm.c` 中补充完整的 Best-Fit 连续物理内存分配器。
 
@@ -367,7 +355,7 @@ First-Fit 使用空闲链表 `free_list` 管理连续空闲物理页块，并通
 
 实现过程中不修改框架提供的 `basic_check()` 和 `best_fit_check()`。
 
-### 实现过程
+#### 实现过程
 
 Best-Fit 与 First-Fit 使用相同的基本空闲页组织方式，通过 `free_area` 保存空闲链表 `free_list` 和当前空闲物理页总数 `nr_free`。每个连续空闲块只将起始页加入链表，并通过块头的 `property` 保存该连续空闲块包含的页数。
 
@@ -391,25 +379,25 @@ Best-Fit 的主要区别体现在页面分配阶段。`best_fit_alloc_pages(n)` 
 
 完成 Best-Fit 实现后，在 `pmm.c` 的 `init_pmm_manager()` 中将当前管理器修改为 `best_fit_pmm_manager`，从而使后续的 `alloc_pages()` 和 `free_pages()` 实际调用本任务实现的 Best-Fit 分配器。
 
-### 最终 Prompt
+#### Prompt 设计
 
+完整 Prompt 见 [`prompt.md`](./prompt.md)。报告中保留的精简版如下：
+
+```markdown
 [PROMPT]
-
-读取当前工程真实代码，在 `best_fit_pmm.c` 的 `YOUR CODE` 位置实现完整 Best-Fit 物理内存管理器，并在 `pmm.c` 中切换当前管理器为 `best_fit_pmm_manager`。不得修改 `basic_check()`、`best_fit_check()` 和评分脚本。
+补全 `kern/mm/best_fit_pmm.c`，并在 `kern/mm/pmm.c` 中切换到 `best_fit_pmm_manager`。
 
 [RELY]
-
-参考当前工程中的 `default_pmm.c`、`pmm.h`、`memlayout.h`、`list.h` 以及已有的 `basic_check()` 和 `best_fit_check()`，所有数据结构、宏和链表接口均以当前源码为准。
+所有结构、宏和链表接口以当前工程的 First-Fit、PMM 和测试代码为准。
 
 [GUARANTEE]
-
-实现 Best-Fit 所需的初始化、初始空闲区登记、页面分配、页面释放、相邻块合并、空闲页统计以及 `best_fit_pmm_manager` 注册，并正确接入现有 PMM 框架。
+不得修改 `basic_check()`、`best_fit_check()` 和评分脚本；完整实现并注册 Best-Fit 管理器。
 
 [SPECIFICATION]
+遍历全部候选块并选择最小可用块，正确完成分割、按地址释放、相邻块合并及空闲页计数维护。
+```
 
-分配时遍历所有满足申请要求的空闲块，并选择其中尺寸最小的块；必要时将剩余部分重新建立为空闲块。释放时按照物理地址插回空闲链表并合并前后相邻空闲块，同时正确维护 `property`、`PG_property`、`free_list` 和 `nr_free`。
-
-### 测试与验证
+#### 测试与验证
 
 本任务完成后，在课程要求的 QEMU 4.1.1 环境中重新进行完整编译与评分测试。
 
@@ -427,7 +415,7 @@ Best-Fit 的主要区别体现在页面分配阶段。`best_fit_alloc_pages(n)` 
 
 因此，Best-Fit 的分配、分割、释放、相邻块合并以及空闲页数量维护均通过课程提供的测试。
 
-### Best-Fit 是否还有改进空间
+#### Best-Fit 是否还有改进空间
 
 我认为 Best-Fit 算法仍然存在进一步的改进空间。
 
@@ -441,231 +429,44 @@ Best-Fit 的主要区别体现在页面分配阶段。`best_fit_alloc_pages(n)` 
 
 因此，Best-Fit 的主要改进方向仍然是在查找效率、内存碎片、合并效率以及实现复杂度之间取得更好的平衡。
 
-## 4.2.3 任务三：Buddy System（伙伴系统）分配算法
+### 4.2.3 任务三：Buddy System（伙伴系统）分配算法
 
 **负责人：2413581-黄奕浩**
 
-### 任务要求
-
-本任务没有现成 Buddy System 代码框架和测试函数。
-
-需要设计**两份 Prompt**：
-
-1. Prompt A：让 AI 参考现有 uCore PMM 框架，从零生成 Buddy System 分配模块并接入内核；
-2. Prompt B：针对 Prompt A 生成的实现设计测试函数。
-
-最终代码需要正常编译运行。
-
-### Buddy System 核心思想
-
-Buddy System 将空闲内存划分成大小为：
-
-```text
-1, 2, 4, 8, 16, 32, ...
-```
-
-页的 2 的幂次块。
-
-分配时：
-
-```text
-寻找最小可满足块
-        ↓
-若过大则不断二分
-        ↓
-直到得到合适大小
-```
-
-释放时：
-
-```text
-找到对应 buddy
-        ↓
-若 buddy 同样空闲且大小相同
-        ↓
-合并成更大块
-        ↓
-继续向上尝试合并
-```
-
-### Prompt A：Buddy 实现
-
-```markdown
-[待填写最终实际使用 Prompt]
-```
-
-### Prompt B：Buddy 测试
-
-```markdown
-[待填写最终实际使用 Prompt]
-```
-
-### 测试覆盖
-
-测试至少应覆盖：
-
-- 初始化；
-- 单页分配；
-- 多页分配；
-- 非 2 的幂大小请求如何处理；
-- 块分裂；
-- buddy 合并；
-- 多次分配和释放；
-- 内存不足；
-- 释放后的再次分配；
-- 空闲页统计是否正确。
-
-### 最终结果
-
-- [ ] Buddy 模块生成
-- [ ] 接入现有 PMM 框架
-- [ ] 测试函数完成
-- [ ] 编译通过
-- [ ] 关键分裂行为正确
-- [ ] 关键合并行为正确
-- [ ] 测试结果记录完成
+待对应负责人完成后补充。
 
 ---
 
-## 4.2.4 Challenge：任意大小的内存单元 SLUB 分配算法
+### 4.2.4 Challenge：任意大小的内存单元 SLUB 分配算法
 
 **负责人：2411302-王乐之**
 
-### 任务要求
-
-本 Challenge 要求实现两层结构：
-
-```text
-第一层：页级物理内存分配
-        ↓
-第二层：在页面内部划分任意大小对象
-```
-
-允许进行简化，只需能够体现 SLUB 的主体思想。
-
-同样需要设计两份 Prompt：
-
-1. Prompt A：从零生成简化 SLUB 分配模块并接入现有内核；
-2. Prompt B：针对该实现生成测试函数。
-
-### Prompt A：SLUB 实现
-
-```markdown
-[待填写最终实际使用 Prompt]
-```
-
-### Prompt B：SLUB 测试
-
-```markdown
-[待填写最终实际使用 Prompt]
-```
-
-### 测试覆盖
-
-至少应考虑：
-
-- 不同对象大小；
-- 同一 slab 中多对象分配；
-- 多 slab 情况；
-- 对象释放；
-- 释放后重新利用；
-- 页级资源的申请和归还；
-- 边界大小；
-- 内存不足；
-- 多次交错分配与释放。
-
-### 最终结果
-
-- [ ] SLUB 模块生成
-- [ ] 接入现有页级分配器
-- [ ] 测试函数完成
-- [ ] 不同大小对象分配正确
-- [ ] 对象释放正确
-- [ ] 测试结果记录完成
-
-> 若最终未选做，应在本节明确记录“本组未选做该 Challenge”。
+待对应负责人完成后补充。
 
 ---
 
-# 4.3 First-Fit 与 Best-Fit 对比分析
+## 4.3 First-Fit 与 Best-Fit 对比分析
 
 **负责人：2412771-谭锦睿**
 
-实验完成后结合 `default_pmm.c` 和最终 `best_fit_pmm.c` 分析：
+根据当前 `default_pmm.c` 和 `best_fit_pmm.c` 的真实实现，两种算法对比如下：
 
 | 对比项 | First-Fit | Best-Fit |
 |---|---|---|
 | 选择策略 | 第一个满足请求的空闲块 | 所有满足请求块中尺寸最小者 |
 | 搜索范围 | 找到后立即停止 | 通常需要继续扫描所有候选 |
 | 查找开销 | 通常较低 | 线性链表下通常更高 |
-| 剩余空间 | 可能留下较大的剩余块 | 单次分配留下较小剩余块 |
-| 碎片特点 | 可能产生外部碎片 | 也可能产生大量很小的碎片 |
-| 改进方向 | 更好的索引结构/其他策略 | 按大小组织结构、Buddy 等 |
-
-[最终实验完成后结合实际代码进一步补充。]
+| 空闲块分割 | 从选中块低地址侧取出请求页，剩余部分成为新空闲块 | 分割方式相同，但选中块通常更接近请求大小 |
+| 外部碎片 | 长期运行可能形成不连续的小块 | 仍有外部碎片，并可能留下大量很小的剩余块 |
+| 实现复杂度 | 选择逻辑简单，找到即可分配 | 需要保存并比较最优候选块，逻辑略复杂 |
 
 ---
 
-# 4.4 分支任务：GDB 调试页表查询过程
+## 4.4 分支任务：GDB 调试页表查询过程
 
 **负责人：三人共同完成**
 
-本任务使用 QEMU + GDB 实际观察 RISC-V Sv39 页表查询过程。
-
-## 4.4.1 分工建议
-
-为了保证“三人共同完成”在报告和 Git 记录中有实际体现，可按以下方式协作：
-
-- 谭锦睿：负责调试环境、`satp`、根页表地址和目标虚拟地址选择；
-- 黄奕浩：负责 VPN2/VPN1/VPN0 拆分、逐级 PTE 查询和 GDB 命令记录；
-- 王乐之：负责最终物理地址计算、结果验证和截图整理；
-- 三人共同检查完整查询链并统一报告内容。
-
-> 上述仅作为协作建议，最终以三人实际调试记录为准。
-
-## 4.4.2 调试目标
-
-需要记录：
-
-1. QEMU Debug 模式启动方法；
-2. GDB 连接方法；
-3. `satp` 寄存器值；
-4. 如何根据 `satp.MODE` 判断 Sv39；
-5. 根页表物理地址；
-6. 选择一个代表性虚拟地址；
-7. 拆分 VPN2、VPN1、VPN0 和 page offset；
-8. 一级一级读取 PTE；
-9. 根据 PTE 得到下一级页表地址或最终物理页；
-10. 得到最终物理地址；
-11. 与 QEMU/MMU 实际转换结果进行验证。
-
-## 4.4.3 调试记录
-
-```text
-[填写实际 GDB 命令和输出]
-```
-
-## 4.4.4 结果截图
-
-```markdown
-![satp与根页表](./images/gdb_satp.png)
-
-![三级页表查询过程](./images/gdb_page_walk.png)
-
-![最终地址验证](./images/gdb_pa_verify.png)
-```
-
-## 4.4.5 最终结果
-
-- [ ] 获取并解释 `satp`
-- [ ] 确认 Sv39
-- [ ] 找到根页表
-- [ ] 拆分 VPN2/VPN1/VPN0/offset
-- [ ] 完成三级页表查询
-- [ ] 得到最终物理地址
-- [ ] 验证地址转换结果
-- [ ] 保存必要截图
-- [ ] 三名成员均参与并理解完整过程
+待对应负责人完成后补充。
 
 ---
 
@@ -673,90 +474,72 @@ Buddy System 将空闲内存划分成大小为：
 
 ## 5.1 编译
 
+在课程工具链环境中执行：
+
 ```bash
 cd ~/os-lab/nku-os/code
 make clean
-make
+make -j2
 ```
 
-记录：
-
-```text
-[最终实际编译输出]
-```
+工程编译成功，生成内核及 `bin/ucore.img`，未出现编译或链接错误。
 
 ## 5.2 QEMU 运行
 
-```bash
-make qemu
+使用 QEMU 4.1.1 执行 `make qemu` 后，OpenSBI 能够正常进入 uCore。启动输出包含：
+
+```text
+DTB Init
+(THU.CST) os is loading ...
+memory management: best_fit_pmm_manager
+check_alloc_page() succeeded!
 ```
 
-需要关注：
-
-- DTB 探测到的物理内存范围；
-- 当前物理内存管理器名称；
-- `check_alloc_page()` 是否成功；
-- Page Init 测试结果；
-- Best-Fit 测试结果；
-- 页表虚拟/物理地址；
-- Buddy/SLUB 若接入后的运行结果。
+其中管理器名称说明 `pmm.c` 已实际选择 `best_fit_pmm_manager`，页面分配自检成功。老师原始 `Makefile` 和 `kern/init/entry.S` 均保持不变。
 
 ## 5.3 自动评分
+
+执行：
 
 ```bash
 make grade
 ```
 
-基础评分重点：
+评分结果为：
 
 ```text
-[Test 1] Page Init: PASS
-[Test 2] Best-Fit: PASS
+-check page init: OK
+-check best fit: OK
+Total Score: 20/20
 ```
 
-最终截图：
-
-```markdown
-![make grade结果](./images/grade_result.png)
-```
+评分过程中，官方脚本注入的测试分别输出 `[Test 1] Page Init: PASS` 和 `[Test 2] Best-Fit: PASS`。由此确认 `page_init()`、Best-Fit 分配与释放、空闲块分割与合并以及空闲页计数均通过官方测试。
 
 ## 5.4 Buddy System 自定义测试
 
-```text
-[填写测试命令、输出和结论]
-```
+待对应负责人完成后补充。
 
 ## 5.5 SLUB 自定义测试
 
-```text
-[若选做，填写测试命令、输出和结论]
-```
+待对应负责人完成后补充。
 
 ---
 
 # 六、Git 提交与协作
 
-Lab2 三名成员统一在 `lab2` 分支协作。
-
-每次开始工作前：
-
-```bash
-git pull --ff-only origin lab2
-```
-
-完成一个独立任务后进行小粒度提交。
+Lab2 三名成员统一在 `lab2` 分支协作。当前已完成任务对应的主要提交如下：
 
 ## 6.1 主要 Commit
 
 | 成员 | 主要 Commit | 内容 |
 |---|---|---|
-| 谭锦睿 | [待填写] | 功能模块一 `page_init()` |
-| 谭锦睿 | [待填写] | 功能模块二任务二 Best-Fit |
-| 黄奕浩 | [待填写] | Buddy System 模块与测试 |
-| 王乐之 | [待填写] | SLUB Challenge 模块与测试 |
-| 三人共同 | [待填写] | GDB 页表查询记录 / 报告整合 |
+| 谭锦睿 | `5b5beff` | 实现功能模块一 `page_init()` |
+| 谭锦睿 | `c5c63f4` | 实现 Best-Fit 并切换 `pmm_manager` |
+| 黄奕浩 | 待对应负责人补充 | Buddy System 模块与测试 |
+| 王乐之 | 待对应负责人补充 | SLUB Challenge 模块与测试 |
+| 三人共同 | 待对应负责人补充 | GDB 页表查询记录与报告整合 |
 
-> 功能模块二任务一属于阅读和思考题，不一定产生代码 commit，应在报告中体现分析成果。
+First-Fit 任务属于源码阅读与思考题，没有单独的代码提交，其分析结果记录在本报告 4.2.1 节。
 
 ---
 
@@ -764,66 +547,25 @@ git pull --ff-only origin lab2
 
 ## 7.1 物理内存初始化
 
-[实验完成后填写。]
-
-重点总结：
-
-- DTB 如何向内核提供物理内存信息；
-- `Page` 描述符与实际物理页的关系；
-- 内核、`Page[]` 和真正空闲页之间的边界；
-- 为什么页边界处理非常重要。
+本实验通过 DTB 获得物理内存起始地址和容量，并在 `page_init()` 中建立可管理物理页范围。`Page[]` 是每个物理页对应的元数据数组，并不等同于物理页本身；其自身占用的内存也必须从可分配区域中排除。实现时还需要排除固件和内核镜像所在区域，并通过页边界对齐保证只把完整、可用的物理页交给 `init_memmap()`。
 
 ## 7.2 页面分配算法
 
-[实验完成后填写。]
-
-重点总结：
-
-- First-Fit；
-- Best-Fit；
-- Buddy System；
-- 三种算法在碎片、搜索效率和合并行为上的区别。
+First-Fit 按链表顺序选择第一个可满足请求的空闲块，通常能够较快结束搜索，但选择结果依赖链表顺序。Best-Fit 遍历全部候选块并选择尺寸最小者，能够减少单次分割留下的空间，却增加了线性查找开销，也不能消除外部碎片。两种实现都依赖正确维护块头的 `property`、`PG_property`、空闲链表和 `nr_free`，释放时按物理地址插入链表能够方便地合并前后相邻块。
 
 ## 7.3 SLUB 与页级分配的关系
 
-[若选做 SLUB Challenge 后填写。]
-
-重点说明：
-
-```text
-页级分配器
-    ↓
-提供若干页面
-    ↓
-SLUB 在页面内部进一步划分对象
-```
-
-以及为什么操作系统既需要页级分配器，也需要小对象分配器。
+待对应负责人完成后补充。
 
 ## 7.4 Sv39 页表理解
 
-[完成 GDB 分支任务后填写。]
+待对应负责人完成后补充。
 
-重点总结：
+## 7.5 Prompt 设计与开发验证
 
-- `satp`；
-- VPN2 / VPN1 / VPN0；
-- PTE；
-- 页表逐级查询；
-- page offset；
-- 最终物理地址计算；
-- TLB 与页表的关系。
+本实验将实现任务拆分为 `[PROMPT]`、`[RELY]`、`[GUARANTEE]` 和 `[SPECIFICATION]` 四部分，使修改目标、真实工程依赖、禁止修改范围和预期行为更加明确。AI 给出的修改仍需结合源码、`git diff`、编译结果和官方测试进行人工核对，不能只依据文字说明判断正确性。
 
-## 7.5 AI 协作开发经验
-
-结合真实实验过程总结：
-
-- 如何把指导书要求转换成四段式 Prompt；
-- 为什么 `[RELY]` 必须来自当前真实工程；
-- 为什么 `[GUARANTEE]` 要明确交付接口；
-- 为什么 `[SPECIFICATION]` 应描述行为而不是直接给代码答案；
-- 为什么 AI 修改后还要使用 `git diff`、编译、测试和 GDB 人工验证；
-- 三人协作时如何划分代码边界，避免覆盖他人修改。
+环境版本同样是实验可复现性的一部分。实验初期由 QEMU 版本不匹配引起的启动异常表明，在修改内核启动代码之前，应先核对课程指定的工具链、QEMU 和 OpenSBI 环境。切换至 QEMU 4.1.1 并恢复老师原始启动文件后，同一实验代码正常运行并取得 20/20。
 
 ---
 
@@ -832,54 +574,40 @@ SLUB 在页面内部进一步划分对象
 ## 功能模块一
 
 - [x] `page_init()` 已实现
-- [ ] Page Init 最终运行验证
-- [ ] Challenge 思考题（选做）
+- [x] DTB 内存范围、`Page[]` 和空闲页区间初始化完成
+- [x] Challenge 思考题完成
+- [x] 官方 Page Init 测试通过
 
 ## 功能模块二
 
 ### 任务一 First-Fit
 
-- [ ] 阅读 `default_init`
-- [ ] 阅读 `default_init_memmap`
-- [ ] 阅读 `default_alloc_pages`
-- [ ] 阅读 `default_free_pages`
-- [ ] 完成 First-Fit 报告分析
-- [ ] 回答 First-Fit 改进空间
+- [x] 阅读并分析 `default_init()`
+- [x] 阅读并分析 `default_init_memmap()`
+- [x] 阅读并分析 `default_alloc_pages()`
+- [x] 阅读并分析 `default_free_pages()`
+- [x] 完成 First-Fit 报告分析
+- [x] 回答 First-Fit 改进空间
 
 ### 任务二 Best-Fit
 
-- [ ] 完整 Prompt
-- [ ] `best_fit_pmm.c` 完整实现
-- [ ] `best_fit_pmm_manager`
-- [ ] `pmm.c` 切换到 Best-Fit
-- [ ] `basic_check()` / `best_fit_check()` 不修改
-- [ ] 回答 Best-Fit 改进空间
-- [ ] `[Test 2] Best-Fit: PASS`
+- [x] 完整四段式 Prompt
+- [x] `best_fit_pmm.c` 完整实现
+- [x] 注册 `best_fit_pmm_manager`
+- [x] `pmm.c` 切换到 Best-Fit
+- [x] 确认 `basic_check()` 与 `best_fit_check()` 未修改
+- [x] 回答 Best-Fit 改进空间
+- [x] `[Test 2] Best-Fit: PASS`
+- [x] `make grade`：20/20
 
 ### 任务三 Buddy System
 
-- [ ] Buddy 实现 Prompt
-- [ ] Buddy 测试 Prompt
-- [ ] Buddy 模块
-- [ ] Buddy 测试函数
-- [ ] 测试覆盖说明
-- [ ] 编译运行通过
+待对应负责人完成后补充。
 
 ### SLUB Challenge
 
-- [ ] SLUB 实现 Prompt
-- [ ] SLUB 测试 Prompt
-- [ ] SLUB 模块
-- [ ] SLUB 测试函数
-- [ ] 测试覆盖说明
-- [ ] 编译运行通过
+待对应负责人完成后补充。
 
-## 分支任务
+## 分支任务：GDB 页表查询
 
-- [ ] 三人共同完成 GDB 调试
-- [ ] `satp` 分析
-- [ ] 根页表定位
-- [ ] VPN 拆分
-- [ ] 三级页表逐级查询
-- [ ] 最终物理地址验证
-- [ ] 调试截图
+待对应负责人完成后补充。
