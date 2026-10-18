@@ -17,7 +17,7 @@
 
 | 成员 | 负责的练习/模块 |
 |------|----------------|
-| 2412771-谭锦睿 | 负责实验整体环境搭建与整合，分析 QEMU/OpenSBI 启动流程，处理 Makefile 启动兼容问题，并完成整体运行验证 |
+| 2412771-谭锦睿 | 负责实验整体环境搭建与整合，分析 QEMU/OpenSBI 启动流程，并完成整体运行验证 |
 | 2413581-黄奕浩 | 负责练习1，分析 `kern/init/entry.S`，重点理解 `la sp, bootstacktop`、`tail kern_init`、内核栈大小及其作用 |
 | 2411302-王乐之 | 负责练习2，使用 GDB 跟踪从 `0x1000` 到 `0x80200000` 的启动过程，验证 `kern_entry`、栈初始化以及进入 `kern_init()` |
 
@@ -25,7 +25,7 @@
 
 | 成员 | 报告分工 |
 |------|----------|
-| 2412771-谭锦睿 | 负责实验整体逻辑、AI 协作过程、QEMU 启动兼容问题、报告整合与最终检查 |
+| 2412771-谭锦睿 | 负责实验整体逻辑、实验环境配置、AI 协作过程、报告整合与最终检查 |
 | 2413581-黄奕浩 | 负责练习1相关内容、内核入口与栈初始化原理整理，以及相关 OS 知识点总结 |
 | 2411302-王乐之 | 负责练习2 GDB 调试过程、测试与验证部分，以及实验截图整理 |
 
@@ -73,23 +73,23 @@ Lab1 的核心问题是：**在还没有进程、虚拟内存、文件系统等�
 
 ```text
 加电复位
-    ↓
+    ↓
 CPU 从 0x1000 开始执行 MROM 启动代码
-    ↓
+    ↓
 跳转到 0x80000000 的 OpenSBI
-    ↓
+    ↓
 OpenSBI 完成初始化并准备下一阶段
-    ↓
+    ↓
 跳转到 0x80200000
-    ↓
+    ↓
 执行 kern/init/entry.S 中的 kern_entry
-    ↓
+    ↓
 建立 uCore 自己的内核栈
-    ↓
+    ↓
 跳转到 kern_init()
-    ↓
+    ↓
 执行 C 语言代码
-    ↓
+    ↓
 输出 (THU.CST) os is loading ...
 ```
 
@@ -112,17 +112,17 @@ BASE_ADDRESS = 0x80200000;
 
 本实验按照下面的顺序完成：
 
-1、**先完成编译与链接**  
-   通过 `make` 生成 `bin/kernel` 和 `bin/ucore.img`，保证后续 QEMU 和 GDB 有可以运行和调试的内核产物。
+1、**先完成编译与链接**  
+   通过 `make` 生成 `bin/kernel` 和 `bin/ucore.img`，保证后续 QEMU 和 GDB 有可以运行和调试的内核产物。
 
-2、**再验证 QEMU/OpenSBI 能否进入 uCore**  
-   通过 `make qemu` 检查 OpenSBI 的 `Domain0 Next Address` 和内核输出。当前环境下原有 Makefile 启动方式无法正确进入内核，因此先通过手工命令定位问题，再对 Makefile 做最小修改。
+2、**再验证 QEMU/OpenSBI 能否进入 uCore**  
+   实验初期误用了系统自带的 QEMU 8.2.2，导致老师原始启动方式无法正常进入 uCore。后续按照课程要求切换到 QEMU 4.1.1，并恢复老师原始 `Makefile` 后，`make qemu` 可以正常启动内核。
 
-3、**理解 `kern_entry` 的作用**  
-   分析 `entry.S` 中的 `la sp, bootstacktop` 和 `tail kern_init`，弄清楚进入 C 语言代码之前为什么必须先准备内核栈。
+3、**理解 `kern_entry` 的作用**  
+   分析 `entry.S` 中的 `la sp, bootstacktop` 和 `tail kern_init`，弄清楚进入 C 语言代码之前为什么必须先准备内核栈。
 
-4、**最后用 GDB 验证整个启动流程**  
-   从 `0x1000` 开始观察启动指令，再在 `0x80200000` 设置断点，验证 OpenSBI 将控制权交给内核，并进一步单步执行到 `kern_init()`。
+4、**最后用 GDB 验证整个启动流程**  
+   从 `0x1000` 开始观察启动指令，再在 `0x80200000` 设置断点，验证 OpenSBI 将控制权交给内核，并进一步单步执行到 `kern_init()`。
 
 这种顺序先保证“能运行”，再分析“为什么能运行”，最后用调试器验证实际行为，使静态代码分析和动态执行结果能够相互对应。
 
@@ -130,176 +130,15 @@ BASE_ADDRESS = 0x80200000;
 
 ## 四、实验内容与实现
 
-### 功能模块：QEMU/OpenSBI 启动兼容调整
+### 实验环境问题说明
 
 **负责人：** 2412771-谭锦睿
 
-#### 模块功能描述
+实验初期使用了系统自带的 QEMU 8.2.2，与课程要求的 QEMU 4.1.1 不一致，导致老师原始 `Makefile` 的启动方式无法正常进入 uCore。
 
-本模块用于解决当前 QEMU 8.2.2 / OpenSBI v1.3 环境下，原 Makefile 使用 `-device loader` 启动时 OpenSBI 无法正确获得下一阶段入口地址的问题。
+后续按照课程要求切换到 QEMU 4.1.1，并将 `Makefile` 恢复为老师原始版本后，重新执行 `make qemu`，OpenSBI 能够正常完成启动并进入 uCore，最终输出 `(THU.CST) os is loading ...`。
 
-**涉及文件/目标：**
-
-```text
-code/Makefile
-qemu target
-debug target
-```
-
-**功能说明：**
-
-原 `make qemu` 运行时出现：
-
-```text
-Domain0 Next Address : 0x0000000000000000
-```
-
-内核没有输出。手工测试 `-kernel bin/ucore.img` 后可以正确得到：
-
-```text
-Domain0 Next Address : 0x0000000080200000
-(THU.CST) os is loading ...
-```
-
-因此需要对 `qemu` 和 `debug` 目标做最小修改，同时保持 `gdb` 目标以及 `debug` 中的 `-s -S` 不变。
-
-#### 最终提示词
-
-以下为本模块实际使用的最终提示词：
-
-````markdown
-[PROMPT]
-
-**任务**：修改 `code/Makefile` 中的 `qemu` 和 `debug` 目标，使它们兼容我当前的 QEMU/OpenSBI 环境。
-
-**操作要求**：
-- 只修改 `code/Makefile` 中与 `qemu`、`debug` 有关的部分。
-- 不修改内核源码。
-- 不执行 commit 或 push。
-- 修改完成后展示 `git diff`。
-
-**输出要求**：
-先简单说明修改原因，再进行最小修改。
-
-[RELY]
-
-当前环境：
-
-- QEMU 8.2.2
-- OpenSBI v1.3
-
-当前 `make qemu` 使用：
-
-```makefile
--device loader,file=$(UCOREIMG),addr=0x80200000
-```
-
-实际运行时：
-
-```text
-Domain0 Next Address : 0x0000000000000000
-```
-
-内核没有输出。
-
-但我已经手工验证：
-
-```bash
-qemu-system-riscv64 \
-  -machine virt \
-  -nographic \
-  -bios default \
-  -kernel bin/ucore.img
-```
-
-可以正常得到：
-
-```text
-Domain0 Next Address : 0x0000000080200000
-(THU.CST) os is loading ...
-```
-
-当前 `gdb` 目标通过 `localhost:1234` 连接 QEMU。
-
-[GUARANTEE]
-
-修改后需要保证：
-
-1、`qemu` 使用 `-kernel $(UCOREIMG)` 启动内核；
-2、`debug` 也使用 `-kernel $(UCOREIMG)`；
-3、`debug` 保留 `-s -S`，供 GDB 连接并在启动时暂停 CPU；
-4、`gdb` 目标保持不变；
-5、不修改其他无关内容。
-
-[SPECIFICATION]
-
-## qemu
-
-**Post-Condition**：
-- `make qemu` 能让 OpenSBI 正确跳转到 `0x80200000`；
-- 最终能够运行 uCore。
-
-## debug
-
-**Post-Condition**：
-- `make debug` 启动 QEMU 后 CPU 立即暂停；
-- QEMU 在 1234 端口等待 GDB；
-- 内核仍使用 `-kernel $(UCOREIMG)` 加载。
-````
-
-#### 实现迭代过程
-
-##### 第一次迭代
-
-**遇到的问题：**
-
-- 原始 `make qemu` 使用 `-device loader,file=$(UCOREIMG),addr=0x80200000`；
-- OpenSBI 显示 `Domain0 Next Address : 0x0000000000000000`；
-- uCore 没有输出，说明控制权没有正确进入内核。
-
-**问题解决策略：**
-
-先手工执行：
-
-```bash
-qemu-system-riscv64 \
-  -machine virt \
-  -nographic \
-  -bios default \
-  -kernel bin/ucore.img
-```
-
-验证 `-kernel` 方式能够正确启动，再通过 Prompt 限定 AI 只修改 `qemu` 和 `debug` 目标。
-
-**最终结果：**
-
-修改后：
-
-```makefile
-qemu:
-    ...
-    -kernel $(UCOREIMG)
-
-debug:
-    ...
-    -kernel $(UCOREIMG) \
-    -s -S
-```
-
-重新执行 `make qemu` 后：
-
--  `Domain0 Next Address` 为 `0x80200000`
--  uCore 成功输出 `(THU.CST) os is loading ...`
--  `make debug` 仍可以通过 1234 端口供 GDB 连接
--  没有修改无关内核代码
-
-**关键改进点总结：**
-
-1. 在提示词的 `[RELY]` 中提供了真实失败输出和已经验证成功的手工命令；
-2. 在 `[GUARANTEE]` 中限制修改范围，避免 AI 改动其他目标；
-3. 修改后通过 `git diff` 和真实 QEMU 运行结果进行二次验证。
-
-![OpenSBI 启动信息](./images/image1.png)
+因此，最开始的启动失败属于 QEMU/OpenSBI 版本环境不一致导致的兼容性问题，最终提交版本未修改老师提供的启动相关代码。
 
 ---
 
@@ -364,8 +203,8 @@ code/tools/kernel.ld
 
 ```asm
 kern_entry:
-    la sp, bootstacktop
-    tail kern_init
+    la sp, bootstacktop
+    tail kern_init
 ```
 
 和：
@@ -464,9 +303,9 @@ int kern_init(void) __attribute__((noreturn));
 且函数最后进入无限循环，因此不需要返回到 `kern_entry`。实际反汇编为：
 
 ```asm
-0x80200000 <kern_entry>:   auipc   sp,0x3
-0x80200004 <kern_entry+4>: mv      sp,sp
-0x80200008 <kern_entry+8>: j       0x8020000a <kern_init>
+0x80200000 <kern_entry>:   auipc   sp,0x3
+0x80200004 <kern_entry+4>: mv      sp,sp
+0x80200008 <kern_entry+8>: j       0x8020000a <kern_init>
 ```
 
 这里也说明源码中的 `la` 和 `tail` 都属于汇编伪指令，最终会转化为 CPU 真正执行的机器指令。
@@ -512,7 +351,7 @@ int kern_init(void) __attribute__((noreturn));
 
 [RELY]
 
-当前已经确认：
+当前已经确认，在课程要求的 QEMU 4.1.1 环境下：
 
 ```text
 make qemu
@@ -521,18 +360,10 @@ make qemu
 能够正常运行，并输出：
 
 ```text
-Domain0 Next Address : 0x0000000080200000
 (THU.CST) os is loading ...
 ```
 
-当前 `debug` 目标已经改为使用：
-
-```makefile
--kernel $(UCOREIMG) \
--s -S
-```
-
-其中：
+当前 `debug` 目标保持老师原始配置，其中：
 
 - `-S`：启动后暂停 CPU；
 - `-s`：开放 GDB 调试端口。
@@ -612,12 +443,12 @@ x/10i $pc
 得到：
 
 ```asm
-0x1000: auipc   t0,0x0
-0x1004: addi    a2,t0,40
-0x1008: csrr    a0,mhartid
-0x100c: ld      a1,32(t0)
-0x1010: ld      t0,24(t0)
-0x1014: jr      t0
+0x1000: auipc   t0,0x0
+0x1004: addi    a2,t0,40
+0x1008: csrr    a0,mhartid
+0x100c: ld      a1,32(t0)
+0x1010: ld      t0,24(t0)
+0x1014: jr      t0
 ```
 
 继续：
@@ -655,7 +486,7 @@ continue
 
 ```text
 Breakpoint 1, kern_entry () at kern/init/entry.S:7
-7           la sp, bootstacktop
+7           la sp, bootstacktop
 ```
 
 再执行：
@@ -694,20 +525,20 @@ GDB 显示：
 
 ```text
 kern_init () at kern/init/init.c:8
-8           memset(edata, 0, end - edata);
+8           memset(edata, 0, end - edata);
 ```
 
 因此练习2实际验证出的完整执行链为：
 
 ```text
 0x1000
-    ↓
+    ↓
 0x80000000 OpenSBI
-    ↓
+    ↓
 0x80200000 kern_entry
-    ↓
+    ↓
 sp = bootstacktop
-    ↓
+    ↓
 kern_init()
 ```
 
@@ -753,21 +584,13 @@ bin/ucore.img
 make qemu
 ```
 
-OpenSBI 输出中可以看到：
-
-```text
-Firmware Base        : 0x80000000
-Domain0 Next Address : 0x0000000080200000
-Domain0 Next Mode    : S-mode
-```
-
-最终出现：
+在课程要求的 QEMU 4.1.1 环境中，OpenSBI v0.4 可以正常启动，随后出现：
 
 ```text
 (THU.CST) os is loading ...
 ```
 
-说明 QEMU → OpenSBI → uCore → `kern_init()` 的完整启动链能够正常运行。
+说明 OpenSBI 已经成功将控制权交给位于 `0x80200000` 的 uCore，并进入 `kern_entry` 和 `kern_init()`，完整启动链能够正常运行。
 
 ![QEMU 最终启动结果](./images/image5.png)
 
@@ -777,13 +600,13 @@ GDB 调试验证了：
 
 ```text
 0x1000
-    ↓
+    ↓
 0x80000000 OpenSBI
-    ↓
+    ↓
 0x80200000 kern_entry
-    ↓
+    ↓
 sp = 0x80203000
-    ↓
+    ↓
 kern_init()
 ```
 
@@ -820,21 +643,21 @@ Lab1 的作用是先建立一条最基本的内核启动链，为后续这些功
 
 在练习1和练习2中，提示词都要求 AI 基于当前项目真实文件进行分析，并限制“不修改源码”或“不执行 commit/push”，这样可以减少 AI 对工程做出无关修改的可能。
 
-QEMU 启动问题则体现了“AI 输出必须验证”这一点。原始 `make qemu` 不能进入内核时，并没有直接让 AI 随意修改 Makefile，而是先通过手工命令确认 `-kernel bin/ucore.img` 在当前环境下确实能够成功启动，再把失败现象、成功命令和修改范围一起放入提示词。AI 完成最小修改后，再通过 `git diff` 和 `make qemu` 验证结果。
+实验初期的 QEMU 启动问题说明了环境版本核对的重要性。最开始使用系统自带的 QEMU 8.2.2 时，老师原始启动方式无法正常进入 uCore；后续确认课程要求使用 QEMU 4.1.1，并切换到规定版本后，老师原始 `Makefile` 即可正常工作。因此最终没有保留针对新版 QEMU 的临时兼容修改。
 
 因此，本次实验中形成的 AI 协作方式可以总结为：
 
 ```text
 先理解实验要求
-    ↓
+    ↓
 提供最小且可信的工程上下文
-    ↓
+    ↓
 明确限制 AI 的修改范围
-    ↓
+    ↓
 AI 分析或修改
-    ↓
+    ↓
 检查 diff
-    ↓
+    ↓
 通过编译、QEMU、GDB 实际验证
 ```
 
