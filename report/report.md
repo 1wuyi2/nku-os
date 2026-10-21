@@ -32,11 +32,10 @@
 - [x] 功能模块一 Challenge：硬件可用物理内存范围的获取方法 —— 谭锦睿
 - [x] 功能模块二任务一：理解 First-Fit 连续物理内存分配算法 —— 谭锦睿
 - [x] 功能模块二任务二：实现 Best-Fit 连续物理内存分配算法 —— 谭锦睿
-- 功能模块二任务三：Buddy System 分配算法 —— 待对应负责人完成后补充。
+- [x] 功能模块二任务三：Buddy System 分配算法 —— 黄奕浩
 - 功能模块二扩展任务 Challenge：任意大小内存单元 SLUB 分配算法 —— 待对应负责人完成后补充。
 - 分支任务：GDB 调试页表查询过程 —— 待三人共同完成后补充。
 
-Buddy System、SLUB Challenge 与 GDB 页表查询任务尚未完成，相关章节保留供对应负责人后续补充。
 
 ### 报告分工
 
@@ -89,7 +88,7 @@ Buddy System、SLUB Challenge 与 GDB 页表查询任务尚未完成，相关章
 | 成员 | AI 编程工具 | 底层模型 | 用途 |
 |---|---|---|---|
 | 2412771-谭锦睿 | Codex | GPT-5 | `page_init()` 与 Best-Fit 的 Prompt 设计、源码核对和测试辅助 |
-| 2413581-黄奕浩 | 待对应负责人补充 | — | Buddy System 模块与测试 |
+| 2413581-黄奕浩 | Codex | GPT-6 | Buddy System 分配模块、测试设计与源码核对 |
 | 2411302-王乐之 | 待对应负责人补充 | — | SLUB 模块与测试 |
 
 ---
@@ -126,7 +125,6 @@ Best-Fit 实现并切换 pmm_manager
 QEMU / make grade 验证
 ```
 
-Buddy System、SLUB Challenge 和 GDB Sv39 页表查询为后续任务，目前不计入已完成的实验主线。
 
 实验指导书给出的核心调用链为：
 
@@ -433,7 +431,33 @@ Best-Fit 的主要区别体现在页面分配阶段。`best_fit_alloc_pages(n)` 
 
 **负责人：2413581-黄奕浩**
 
-待对应负责人完成后补充。
+本任务在现有 uCore 物理内存管理框架上实现 Buddy System，并设计对应测试。新增文件为 `kern/mm/buddy_pmm.c` 和 `buddy_pmm.h`，`pmm.c` 只增加管理器头文件和条件选择，未改动 `page_init()`、Makefile、原有分配器及官方测试。两份四段式提示词分别用于分配模块和测试函数，完整内容见 [prompt1.md](./prompt1.md)，原 `prompt.md` 保持不变。
+
+我使用按阶分类的空闲链表管理物理页，第 `order` 阶管理 `2^order` 页大小的块，范围为 0 至 20 阶。空闲块头设置 `PG_property`，并用 `property` 保存实际块页数；`nr_free` 统计所有空闲物理页。已分配块头使用 `flags` 的独立第 2 位标识，`property` 改为记录原申请页数。第 3 位只在一致性检查期间临时标记已访问的空闲页，检查结束即清除，不改变 `struct Page`。
+
+初始化时，`buddy_init()` 建立各阶空链表，`buddy_init_memmap(base, n)` 初始化可用区间内的描述符，再根据绝对物理页号 `page2ppn(base)` 的对齐条件和剩余长度，每次登记能够容纳的最大二次幂块。因此，即使初始空闲区起点不对齐、长度不是二次幂，也能完整登记，不会简单截去边界页。固件、内核和描述符数组占用的区域仍由原有 `page_init()` 保留。
+
+分配时，`buddy_alloc_pages(n)` 先检查请求是否为 0、是否超出空闲页数或最大阶，再将请求向上取整为二次幂，从能够满足请求的最小非空阶取块。如果取到的块较大，就逐级分成两半，保留低地址半块，另一半加入下一阶链表，直到达到目标阶。
+
+例如，申请 3 页实际占用 4 页，申请 5 页实际占用 8 页，`nr_free` 应分别减去 4、8，而不是 3、5。调用者必须使用原申请地址和原请求数释放，如 `free_pages(p, 3)`，分配器依据记录回收整个 4 页块，不支持部分释放。这个约定避免了向上取整后多余页面无法回收的问题，但也说明 Buddy 存在内部碎片。
+
+释放时，`buddy_free_pages(base, n)` 首先核对已分配块头标志、原请求数和块边界，再清理整个实际块的页状态并恢复空闲计数。伙伴物理页号通过 `buddy_ppn = ppn XOR (1 << order)` 计算。只有伙伴处于有效范围、为空闲块头且大小相同，才从链表摘除伙伴，以较低地址作为新块头并升一阶，继续递归合并。仅仅物理地址相邻，并不意味着两个块一定能够合并。
+
+管理器通过 `buddy_pmm_manager` 注册，包含初始化、登记、分配、释放、空闲页查询和 `buddy_check()`。`pmm.c` 在定义 `USE_BUDDY` 时选择该管理器，未定义时继续选择 `best_fit_pmm_manager`。原 Makefile 已经把 `$(DEFS)` 加入编译参数，因此无须修改构建规则，运行命令为：
+
+```bash
+make clean
+make DEFS=-DUSE_BUDDY -j4
+make qemu DEFS=-DUSE_BUDDY
+```
+
+两种算法共享原有构建目录，切换前必须执行 `make clean`，避免复用上一种配置的目标文件。恢复默认 Best-Fit 时执行 `make clean`、`make -j4` 和 `make qemu`。
+
+本次于 2026-10-21 在 WSL2 Ubuntu、QEMU 4.1.1、`riscv64-unknown-elf-gcc` 13.2.0 环境下完成编译和实际运行。终端显示 `memory management: buddy_pmm_manager`，确认执行的是 Buddy 实现。算法的查阶、分裂与合并最多经过 20 次升降阶；释放时还需要逐页重置描述符，因此整个释放函数包含与实际块页数成正比的开销。当前实现面向实验的单核启动环境，尚未增加并发同步。
+
+![图 1：QEMU 版本与 Buddy 编译结果](./images/buddy-version-and-build.png)
+
+图 1：本人 Ubuntu 终端实际运行结果。QEMU 版本为 4.1.1，执行 `make clean` 和 `make DEFS=-DUSE_BUDDY -j4` 后，Buddy 源文件编译成功，并完成内核链接及 `bin/ucore.img` 生成。
 
 ---
 
@@ -517,7 +541,49 @@ Total Score: 20/20
 
 ## 5.4 Buddy System 自定义测试
 
-待对应负责人完成后补充。
+**负责人：2413581-黄奕浩。**
+
+测试函数 `buddy_check()` 位于 `buddy_pmm.c`，由已有的 `check_alloc_page()` 经管理器的 `check` 接口调用。执行 `make qemu DEFS=-DUSE_BUDDY` 即可在真实 QEMU 内核中运行，不需要额外脚本。每个 PASS 都在对应断言通过后输出。
+
+测试首先检查真实空闲区，借出一块 64 页对齐区域，再暂存原空闲链表。为避免隔离区与外部空闲块合并，暂存期间同时屏蔽外部块头的 `PG_property`；测试完成后恢复链表和标志，并归还借出的区域。这样既能构造内存耗尽、碎片化等边界情况，也不会破坏实际可用内存。
+
+| 测试 | 覆盖内容及验证方法 | 本次结果 |
+|---|---|---|
+| 1：不对齐初始化 | 在 64 页区域内，从偏移 1 页处登记 61 页，逐页申请至耗尽，检查地址范围、不重复及释放后恢复 61 页 | PASS |
+| 2：取整与数据隔离 | 分别申请 3、5 页，验证实际占用 4、8 页、对齐且不重叠；写入并检查各请求页的数据，释放后恢复全部空闲页 | PASS |
+| 3：分裂与递归合并 | 从 64 页块取出两个单页，检查分裂位置；释放后重新申请完整 64 页成功 | PASS |
+| 4：合并条件 | 分配 16、16、32 页，仅释放第一块和第三块时，虽然空闲 48 页，仍不能申请 64 页；释放中间块后可以合并回 64 页 | PASS |
+| 5：碎片化 | 分配全部 64 个单页，交替释放 32 页，此时 2 页连续申请失败；释放剩余页后完整 64 页申请成功 | PASS |
+| 6：申请边界 | 0 页、65 页和 `(size_t)-1` 请求均失败，且 64 页测试区的空闲计数不变 | PASS |
+| 7：混合操作 | 以学号 2413581 为种子执行 512 次操作；逐步检查分配范围、对齐、无重叠及空闲页计数，最后全部回收 | PASS |
+| 8：真实内存恢复 | 恢复原空闲链表和块头标志，归还测试区，再次检查真实空闲区结构与计数 | PASS |
+
+一致性检查还会检查双向链表是否正确、空闲块是否按阶对齐、页面覆盖是否重复、同阶伙伴是否已经合并，以及各空闲块页数之和是否等于 `nr_free`。因此，测试不仅检查函数是否返回非空，还检查内部状态和释放后的完整恢复。
+
+本轮 QEMU 实际输出为：
+
+```text
+memory management: buddy_pmm_manager
+[Buddy] initial free pages: 31928
+[Buddy Test 1] unaligned 61-page range: PASS
+[Buddy Test 2] rounding 3->4, 5->8 and data isolation: PASS
+[Buddy Test 3] split and recursive merge to 64 pages: PASS
+[Buddy Test 4] different orders do not merge prematurely: PASS
+[Buddy Test 5] fragmented 32 free pages reject 2-page request: PASS
+[Buddy Test 6] zero, oversized and overflow requests: PASS
+[Buddy Test 7] 512-operation stress: PASS (195 alloc, 131 failures)
+[Buddy Test 8] real memory restored: PASS (31928 -> 31928 pages)
+[Buddy] ALL 8 TESTS PASSED
+check_alloc_page() succeeded!
+```
+
+测试 7 中共有 195 次申请成功、131 次申请因空间不足或碎片化失败，其余操作为释放；这些预期申请失败不是测试失败。测试 8 确认真正可用的空闲页数从 31928 恢复为 31928。测试 5 则说明，空闲总量足够不等于能够满足连续内存请求，不能据此认为 Buddy 已经消除了所有碎片。
+
+现有官方评分针对 Page Init 和 Best-Fit，不包含 Buddy，本任务的八组自测结果不作为官方 20 分评分的替代。
+
+![图 2：Buddy System 八组自测运行结果](./images/buddy-test-results.png)
+
+图 2：本人终端实际运行结果。当前管理器为 `buddy_pmm_manager`，八组测试全部通过，真实空闲页数由 31928 恢复为 31928，并输出 `check_alloc_page() succeeded!`。
 
 ## 5.5 SLUB 自定义测试
 
@@ -535,7 +601,7 @@ Lab2 三名成员统一在 `lab2` 分支协作。当前已完成任务对应的�
 |---|---|---|
 | 谭锦睿 | `5b5beff` | 实现功能模块一 `page_init()` |
 | 谭锦睿 | `c5c63f4` | 实现 Best-Fit 并切换 `pmm_manager` |
-| 黄奕浩 | 待对应负责人补充 | Buddy System 模块与测试 |
+| 黄奕浩 | 本地实现已完成，尚未提交 | Buddy System 模块、内核自测 |
 | 王乐之 | 待对应负责人补充 | SLUB Challenge 模块与测试 |
 | 三人共同 | 待对应负责人补充 | GDB 页表查询记录与报告整合 |
 
@@ -602,7 +668,15 @@ First-Fit 按链表顺序选择第一个可满足请求的空闲块，通常能�
 
 ### 任务三 Buddy System
 
-待对应负责人完成后补充。
+- [x] 在 `prompt1.md` 记录实现和测试两份四段式提示词
+- [x] Buddy 分配器实现、管理器注册及内核接入
+- [x] 不对齐区间登记、二次幂分裂、伙伴递归合并与计数维护
+- [x] 八组实际 QEMU 测试及 512 次混合操作通过
+- [x] 测试结束后真实空闲页数完全恢复
+- [x] 完成实现说明、测试覆盖与结果分析
+- [x] 补充本人 Buddy 自测终端截图
+- [x] 补充 QEMU 版本与编译终端截图
+- [ ] 补充实际 Git 提交编号
 
 ### SLUB Challenge
 
