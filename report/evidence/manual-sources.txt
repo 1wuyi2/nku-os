@@ -1,7 +1,0 @@
-2026-10-24：最初网页工具访问首页失败，随后 WSL curl 成功获取以下课程页面并核对正文。
-http://oslab.mobisys.top/lab2026/_book/lab2/lab2.html
-http://oslab.mobisys.top/lab2026/_book/lab2/lab2_2_1_exercise.html
-http://oslab.mobisys.top/lab2026/_book/lab2/lab2_4_qemu_mmu_debug.html
-阅读确认：简化 SLUB 应体现页级/对象级两层架构；要求实现与测试两份 Prompt；GDB 分支要求观察 QEMU walker 及 TLB，允许按确定被访问的地址设置条件断点。
-QEMU 源码： https://download.qemu.org/qemu-4.1.1.tar.xz
-本轮实际阅读 target/riscv/cpu_helper.c:155-350,435-480 及 accel/tcg/cputlb.c:843-849,1023-1052。

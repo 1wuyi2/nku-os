@@ -431,7 +431,7 @@ Best-Fit 的主要区别体现在页面分配阶段。`best_fit_alloc_pages(n)` 
 
 **负责人：2413581-黄奕浩**
 
-本任务在现有 uCore 物理内存管理框架上实现 Buddy System，并设计对应测试。新增文件为 `kern/mm/buddy_pmm.c` 和 `buddy_pmm.h`，`pmm.c` 只增加管理器头文件和条件选择，未改动 `page_init()`、Makefile、原有分配器及官方测试。两份四段式提示词分别用于分配模块和测试函数，完整内容见 [prompt1.md](./prompt1.md)，原 `prompt.md` 保持不变。
+本任务在现有 uCore 物理内存管理框架上实现 Buddy System，并设计对应测试。新增文件为 `kern/mm/buddy_pmm.c` 和 `buddy_pmm.h`，`pmm.c` 只增加管理器头文件和条件选择，未改动 `page_init()`、Makefile、原有分配器及官方测试。两份四段式提示词分别用于分配模块和测试函数，完整内容统一汇总于 [prompt.md](./prompt.md)。
 
 我使用按阶分类的空闲链表管理物理页，第 `order` 阶管理 `2^order` 页大小的块，范围为 0 至 20 阶。空闲块头设置 `PG_property`，并用 `property` 保存实际块页数；`nr_free` 统计所有空闲物理页。已分配块头使用 `flags` 的独立第 2 位标识，`property` 改为记录原申请页数。第 3 位只在一致性检查期间临时标记已访问的空闲页，检查结束即清除，不改变 `struct Page`。
 
@@ -510,12 +510,7 @@ s->charged = before - nr_free_pages();
 
 #### Prompt
 
-本次采用一份总任务连续开发，以下两份文档由总任务整理，是实际实现和测试的完整子规格，没有发生两次独立的模型调用：
-
-- [SLUB 实现 Prompt](./prompt_slub_impl.md)：规定真实依赖、八缓存、独立页头、位图、状态链表、大对象、释放防护及 PMM 兼容约束。
-- [SLUB 测试 Prompt](./prompt_slub_test.md)：规定十一组实际内核测试、逐操作一致性检查、真实耗尽构造和回归标准。
-
-两份文档均采用 `[PROMPT]`、`[RELY]`、`[GUARANTEE]`、`[SPECIFICATION]` 四段结构。原始总任务、环境处理和调试命令修正过程见 [开发记录](./development.md)。
+本次采用一份总任务连续完成实现和测试。SLUB 实现 Prompt 与测试 Prompt 均已按 `[PROMPT]`、`[RELY]`、`[GUARANTEE]`、`[SPECIFICATION]` 四段结构汇总到 [prompt.md](./prompt.md) 的“Lab2 SLUB 提示词记录”部分。实现规格覆盖八缓存、独立页头、状态管理、大对象与 PMM 兼容约束；测试规格覆盖十一组实际内核测试及回归标准。两份子规格属于同一轮连续开发，没有虚构两次独立的模型调用。
 
 ---
 
@@ -546,18 +541,38 @@ s->charged = before - nr_free_pages();
 
 `make debug` 使用 `-s -S` 在 localhost:1234 监听并从复位状态暂停，内核 ELF 为 `code/bin/kernel`。`entry.S` 在跳转 `kern_init` 前写入 `satp` 并执行 `sfence.vma`。本轮 guest GDB 在 `slub_init()` 入口断下，此时 PMM 初始化及自检已经完成。QEMU monitor 的 `xp` 支持物理地址读取。
 
-复现命令如下，需先恢复默认构建；`validate_slub.py` 结束时已经完成此步骤：
+在仓库根目录打开终端一，进入 `code` 后恢复默认构建并启动暂停的 QEMU：
 
 ```bash
-cd /home/wlz/nku-os-lab2/nku-os-lab2/code
+cd code
 QEMU_LAB2="$HOME/.local/opt/qemu-4.1.1/bin/qemu-system-riscv64 -L $HOME/.local/opt/qemu-4.1.1/share/qemu"
-python3 tools/debug_sv39.py --qemu "$QEMU_LAB2"
-python3 tools/debug_qemu_mmu.py \
-  --qemu "$HOME/.local/opt/qemu-4.1.1/bin/qemu-system-riscv64" \
-  --bios-dir "$HOME/.local/opt/qemu-4.1.1/share/qemu"
+make clean
+make -j4
+make debug QEMU="$QEMU_LAB2"
 ```
 
-第一个脚本实际启动 `make debug`，再执行 `gdb-multiarch -q -batch -x tools/sv39.gdb`。核心命令为 `file bin/kernel`、`target remote localhost:1234`、`break slub_init`、`continue`、`info registers pc satp` 和 `monitor xp`。第二个脚本用主机原生 `gdb` 启动含调试信息的 QEMU，条件断点地址从当前 ELF 的 `kern_init` 符号动态取得，无须 sudo 或附加到外部进程。
+在同一仓库根目录打开终端二，执行 guest GDB 命令文件，结果直接输出到终端：
+
+```bash
+cd code
+gdb-multiarch -q -batch -x tools/sv39.gdb
+```
+
+该命令文件包含 `file bin/kernel`、`target remote localhost:1234`、`break slub_init`、`continue`、`info registers pc satp`、物理读取与结果断言。截图后在终端一按 Ctrl+A 再按 X 退出 QEMU。
+
+QEMU 主机端调试使用原生 `gdb`。进入 `code` 目录，从当前 ELF 动态取得 `kern_init` 地址，执行以下命令；源码断点要求本机保留 `/tmp/qemu-4.1.1` 源码树，源码移动后可用 GDB 的 `set substitute-path` 指定新位置：
+
+```bash
+KERN_INIT_VA=$(riscv64-unknown-elf-nm bin/kernel | awk '$3=="kern_init" {print "0x"$1}')
+gdb -q -batch -ex "set \$observed_va=$KERN_INIT_VA" \
+  -x tools/qemu_mmu.gdb --args \
+  "$HOME/.local/opt/qemu-4.1.1/bin/qemu-system-riscv64" \
+  -L "$HOME/.local/opt/qemu-4.1.1/share/qemu" \
+  -machine virt -nographic -bios default \
+  -device loader,file=bin/ucore.img,addr=0x80200000
+```
+
+两个调试命令文件直接展示断点、页表数据和检查结果，不生成报告目录下的附加文件。
 
 #### 页表查询
 
@@ -589,7 +604,7 @@ PA = 0x80000000 | 0x002000d6 = 0x802000d6
 
 #### 结果验证
 
-GDB 的 `x/8bx 0xffffffffc02000d6` 与 `monitor xp /8bx 0x802000d6` 均返回 `17 65 00 00 13 05 25 f4`。脚本逐字节比较虚拟读取与物理读取，并检查 `VA-0xffffffff40000000==PA`，实际输出 `[Sv39] REAL GDB WALK PASSED`。完整记录为 [guest GDB 日志](./evidence/sv39-gdb.log)，串口记录为 [调试启动日志](./evidence/sv39-qemu.log)。通用遍历脚本对非叶子继续按 PPN 查下一级，同时检查 V、W/R 合法性、超级页对齐及保留位；本轮真实内核只有这一层叶子路径，未伪造三级访问数据。
+GDB 的 `x/8bx 0xffffffffc02000d6` 与 `monitor xp /8bx 0x802000d6` 均返回 `17 65 00 00 13 05 25 f4`。脚本逐字节比较虚拟读取与物理读取，并检查 `VA-0xffffffff40000000==PA`，实际输出 `[Sv39] REAL GDB WALK PASSED`。实际结果见本节截图。通用遍历脚本对非叶子继续按 PPN 查下一级，同时检查 V、W/R 合法性、超级页对齐及保留位；本轮真实内核只有这一层叶子路径，未伪造三级访问数据。
 
 #### QEMU 源码调试
 
@@ -597,9 +612,9 @@ GDB 的 `x/8bx 0xffffffffc02000d6` 与 `monitor xp /8bx 0x802000d6` 均返回 `1
 
 通过两次 `next` 执行实际物理页计算后，输出页基址为 `0x80200000`。该函数为软件 TLB 生成 4 KiB 页基址，最终字节地址还需加 `0xd6`；`tlb_set_page` 实际收到 VA `0xffffffffc0200000`、PA `0x80200000`、prot=7、mmu_idx=1、size=`0x1000`。随后在 `accel/tcg/cputlb.c:1030` 再次停下，观察到 `entry->addr_code=0xffffffffc0200000`，`next` 直接到 1039 行，跳过 miss 分支和页表遍历，实际验证 TLB 命中。
 
-另外在复位阶段的 M 模式访问断下，地址 `0x1000`、satp=0、priv=3，翻译直接返回物理地址 `0x1000`。即使这一阶段不查 Sv39 页表，QEMU 仍经过其软件 TLB 缓存路径。完整记录为 [QEMU 主机 GDB 日志](./evidence/qemu-mmu-gdb.log)。第一次尝试打印被优化的循环变量 `i` 失败，原始日志保存在 `qemu-mmu-gdb-first-attempt.log`；删除冗余打印后重新执行成功，最终标记为 `[QEMU MMU] REAL HOST DEBUG PASSED`。
+另外在复位阶段的 M 模式访问断下，地址 `0x1000`、satp=0、priv=3，翻译直接返回物理地址 `0x1000`。即使这一阶段不查 Sv39 页表，QEMU 仍经过其软件 TLB 缓存路径。第一次尝试打印循环变量 `i` 时出现 `value has been optimized out`；改为查看仍可观察的 PPN、ptshift 和实际输出指针，重新执行后输出 `[QEMU MMU] REAL HOST DEBUG PASSED`。
 
-用户在本地终端执行调试后提供的真实截图如下，图中 satp、根层 PTE、超级页物理地址与字节比对结果均与本轮日志一致。QEMU 主机端源码调试的详细过程保留在原始日志中。
+本轮实际调试截图如下，包含 satp、根层 PTE、超级页物理地址与字节比对结果；QEMU 主机端观察值及分析已整理在上文。
 
 ![图 4.4：Sv39 页表查询与地址验证](./images/sv39-gdb-results.png)
 
@@ -724,7 +739,7 @@ check_alloc_page() succeeded!
 
 #### 实验结果
 
-本轮使用 GCC 13.2.0、QEMU 4.1.1、128 MiB RAM。命令和清理顺序由 `tools/validate_slub.py` 保存到日志；相当于依次执行：
+本轮使用 GCC 13.2.0、QEMU 4.1.1、128 MiB RAM。在 `code` 目录依次执行以下命令，切换配置前先清理构建产物：
 
 ```bash
 make clean
@@ -746,15 +761,15 @@ make qemu QEMU="$QEMU_LAB2"
 
 这些页数来自不同配置的真实内核镜像，不应与原报告早期 Buddy 的 31928 强行相等。启用测试和不同管理器会改变代码/静态数据体积；本轮验收条件是各自运行前后页数相等。
 
-#### 证据与分析
+#### 测试截图与分析
 
-完整日志见 [SLUB](./evidence/slub-qemu.log)、[Buddy 与 SLUB](./evidence/buddy-slub-qemu.log)、[官方评分](./evidence/grade.log)、[官方串口](./evidence/grade-serial.log)、[默认最终启动](./evidence/default-final-qemu.log)；编译记录及配置汇总位于 [evidence](./evidence/README.md)。用户在本地终端运行后提供的真实 SLUB 截图如下。
+本轮 SLUB 终端运行截图如下，包含十一组自测结果、物理页回收和压力测试统计。
 
 ![图 5.5：SLUB 十一组自测结果](./images/slub-test-results.png)
 
 图 5.5：真实终端截图。十一组测试全部通过；16 字节缓存单 Slab 容量为 248，真实空闲页数从 31924 恢复到 31924，1024 次压力操作包括 528 次申请和 496 次释放，最后输出 `[SLUB] ALL TESTS PASSED`。
 
-SLUB 实现及自测首轮编译、运行即通过，未出现内核 panic、断言失败或数据破坏，因此没有虚构算法失败记录。本轮实际问题为 QEMU 版本不符、旧版构建参数及本地依赖、GDB 打印优化变量，这些环境和调试问题及真实修正分别保存在开发记录和失败日志。成功标记后脚本主动终止 QEMU，避免内核末尾无限循环持续占用 CPU；日志的 SIGTERM 属于该收尾过程。最终已清理并恢复默认 Best-Fit 构建。
+SLUB 实现及自测首轮编译、运行即通过，未出现内核 panic、断言失败或数据破坏。本轮首先解决系统 QEMU 8.2.2 与课程环境不匹配的问题，使用本地构建的 QEMU 4.1.1 完成实际验证；GDB 优化变量的观察问题见 4.4 节。内核在测试结束后停留于启动末尾的循环，可按 Ctrl+A 再按 X 退出。最终已清理并恢复默认 Best-Fit 构建。
 
 ---
 
@@ -769,12 +784,14 @@ Lab2 三名成员统一在 `lab2` 分支协作。当前已完成任务对应的�
 | 谭锦睿 | `5b5beff` | 实现功能模块一 `page_init()` |
 | 谭锦睿 | `c5c63f4` | 实现 Best-Fit 并切换 `pmm_manager` |
 | 黄奕浩 | `f04ce5a` | 实现并接入 Buddy System，完成八组内核自测 |
-| 王乐之 | `2cba00f` | 实现 SLUB、十一组内核自测及完整回归验证工具 |
+| 王乐之 | `2cba00f` | 实现 SLUB、十一组内核自测及回归验证 |
 | 三人共同 | `2cba00f` | 新增 guest Sv39 与 host QEMU/MMU/TLB 调试脚本，真实结果见 4.4 节 |
 
 First-Fit 任务属于源码阅读与思考题，没有单独的代码提交，其分析结果记录在本报告 4.2.1 节。
 
-2026-10-24 初始工作目录是缺少 `.git` 的解压副本，先保存修改前基线及差异。用户随后提供真实仓库 `https://github.com/1wuyi2/nku-os.git` 并授权上传，已从 `lab2` 分支克隆到 `/home/wlz/nku-os-lab2/nku-os-git`，确认远程基线 `dc81539` 与本轮开发前源码及报告一致，再迁入本次修改。实际实现提交为 `2cba00f`；报告、两份 Prompt、运行证据和两张用户提供的真实截图随独立文档提交保存。原 PMM 算法逻辑、官方评分、Makefile、启动汇编及链接脚本均保持不变，未纳入构建产物或其他成员的未提交内容。提交规范复核时，保留 `lab2 function1`、`lab2 function2-2` 注释，将两处占位文字替换为实际负责人谭锦睿的学号 `2412771`。
+本小组统一使用公开仓库 `https://github.com/1wuyi2/nku-os`，本实验交付于 `lab2` 分支。SLUB 实现提交为 `2cba00f`，报告与截图提交为 `5c0ed0c`；提交说明统一为“完善报告”。提交规范复核时保留 `lab2 function1`、`lab2 function2-2` 标记，将两处占位文字替换为实际负责人谭锦睿的学号 `2412771`，对应提交为 `27572ac`，复核后官方评分仍为 20/20。
+
+分支保持 `code/` 与 `report/` 两个交付目录；`report/` 中仅保留 `report.md`、汇总各成员提示词的 `prompt.md` 和测试截图目录 `images/`。原 PMM 算法逻辑、官方评分、Makefile、启动汇编及链接脚本均保持不变。
 
 ---
 
@@ -847,7 +864,7 @@ guest GDB 的虚拟/物理字节比较与 host GDB 中 QEMU 的页表读取、�
 
 ### 任务三 Buddy System
 
-- [x] 在 `prompt1.md` 记录实现和测试两份四段式提示词
+- [x] 在 `prompt.md` 汇总实现和测试两份四段式提示词
 - [x] Buddy 分配器实现、管理器注册及内核接入
 - [x] 不对齐区间登记、二次幂分裂、伙伴递归合并与计数维护
 - [x] 八组实际 QEMU 测试及 512 次混合操作通过
@@ -861,12 +878,12 @@ guest GDB 的虚拟/物理字节比较与 host GDB 中 QEMU 的页表读取、�
 - [x] 大对象、边界防护、Slab 状态转换和立即回收
 - [x] Best-Fit/Buddy 上层十一组自测及 1024 次压力操作通过
 - [x] 真实物理页数完全恢复，默认官方评分保持 20/20
-- [x] 报告、原始终端日志和可复现脚本保存
+- [x] 报告、统一 Prompt 和真实测试截图保存
 - [x] 在小组真实 `lab2` 仓库完成正式实现 commit（`2cba00f`）
 
 ## 分支任务：GDB 页表查询
 
 - [x] 真实 satp、VPN、PTE、超级页物理地址计算及字节比对
 - [x] 实际 QEMU 源码 walker、M 模式直通、TLB miss/填充/命中观察
-- [x] GDB 命令文件、执行脚本及原始输出保存
+- [x] GDB 命令文件、实际观察值及调试截图整理完成
 - [x] 用户提供的真实 SLUB 与 Sv39 终端截图已保存并插入对应章节
