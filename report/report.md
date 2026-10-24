@@ -514,111 +514,765 @@ s->charged = before - nr_free_pages();
 
 ---
 
-## 4.3 First-Fit 与 Best-Fit 对比分析
-
-**负责人：2412771-谭锦睿**
-
-根据当前 `default_pmm.c` 和 `best_fit_pmm.c` 的真实实现，两种算法对比如下：
-
-| 对比项 | First-Fit | Best-Fit |
-|---|---|---|
-| 选择策略 | 第一个满足请求的空闲块 | 所有满足请求块中尺寸最小者 |
-| 搜索范围 | 找到后立即停止 | 通常需要继续扫描所有候选 |
-| 查找开销 | 通常较低 | 线性链表下通常更高 |
-| 空闲块分割 | 从选中块低地址侧取出请求页，剩余部分成为新空闲块 | 分割方式相同，但选中块通常更接近请求大小 |
-| 外部碎片 | 长期运行可能形成不连续的小块 | 仍有外部碎片，并可能留下大量很小的剩余块 |
-| 实现复杂度 | 选择逻辑简单，找到即可分配 | 需要保存并比较最优候选块，逻辑略复杂 |
-
----
-
 ## 4.4 分支任务：GDB 调试页表查询过程
 
 **负责人：三人共同完成**
 
-#### 调试环境
+### 调试环境
 
-本轮在 2026-10-24 实际执行内核端和 QEMU 主机端两种 GDB 调试。系统 QEMU 为 8.2.2，因此从官方源码本地构建并使用 QEMU 4.1.1，二进制位于 `/home/wlz/.local/opt/qemu-4.1.1/bin/qemu-system-riscv64`；`-L` 指定同目录下 `share/qemu` 的固件。构建保留 `-O2 -g` 调试信息，没有替换系统安装或修改工程 Makefile。
+本任务同时使用 guest 端 RISC-V GDB 和 host 端原生 GDB，对 uCore 的 Sv39 地址翻译过程以及 QEMU 4.1.1 中的软件 TLB 实现进行调试。
 
-`make debug` 使用 `-s -S` 在 localhost:1234 监听并从复位状态暂停，内核 ELF 为 `code/bin/kernel`。`entry.S` 在跳转 `kern_init` 前写入 `satp` 并执行 `sfence.vma`。本轮 guest GDB 在 `slub_init()` 入口断下，此时 PMM 初始化及自检已经完成。QEMU monitor 的 `xp` 支持物理地址读取。
+为避免系统中已有 QEMU 版本与实验要求不一致，另外从源码构建带调试信息的 QEMU 4.1.1，并直接使用源码构建目录中的 `qemu-system-riscv64`，不替换系统安装。调试版 QEMU 能够在 GDB 中直接定位到 `target/riscv/cpu_helper.c`、`accel/tcg/cputlb.c` 等源码。
 
-在仓库根目录打开终端一，进入 `code` 后恢复默认构建并启动暂停的 QEMU：
+本次调试使用三个终端：
+
+- 终端一运行带 `-s -S` 参数的 Debug QEMU，使模拟 CPU 从复位状态暂停并监听 `localhost:1234`。
+- 终端二使用宿主机原生 GDB 附加 QEMU 进程，调试 QEMU 本身的 MMU 与软件 TLB 实现。
+- 终端三使用 `riscv64-unknown-elf-gdb` 连接 QEMU 的 GDB Stub，控制 QEMU 中运行的 uCore。
+
+调试版 QEMU 可统一通过环境变量指定，例如：
+
+```bash
+QEMU_DEBUG="$HOME/src/qemu-4.1.1/build-debug/riscv64-softmmu/qemu-system-riscv64"
+
+cd code
+make QEMU="$QEMU_DEBUG" debug
+```
+
+guest 端使用：
 
 ```bash
 cd code
-QEMU_LAB2="$HOME/.local/opt/qemu-4.1.1/bin/qemu-system-riscv64 -L $HOME/.local/opt/qemu-4.1.1/share/qemu"
-make clean
-make -j4
-make debug QEMU="$QEMU_LAB2"
+make gdb
 ```
 
-在同一仓库根目录打开终端二，执行 guest GDB 命令文件，结果直接输出到终端：
+host 端首先取得 QEMU 进程 PID：
 
 ```bash
-cd code
-gdb-multiarch -q -batch -x tools/sv39.gdb
+pgrep -af qemu-system-riscv64
 ```
 
-该命令文件包含 `file bin/kernel`、`target remote localhost:1234`、`break slub_init`、`continue`、`info registers pc satp`、物理读取与结果断言。截图后在终端一按 Ctrl+A 再按 X 退出 QEMU。
-
-QEMU 主机端调试使用原生 `gdb`。进入 `code` 目录，从当前 ELF 动态取得 `kern_init` 地址，执行以下命令；源码断点要求本机保留 `/tmp/qemu-4.1.1` 源码树，源码移动后可用 GDB 的 `set substitute-path` 指定新位置：
+再使用原生 GDB 附加：
 
 ```bash
-KERN_INIT_VA=$(riscv64-unknown-elf-nm bin/kernel | awk '$3=="kern_init" {print "0x"$1}')
-gdb -q -batch -ex "set \$observed_va=$KERN_INIT_VA" \
-  -x tools/qemu_mmu.gdb --args \
-  "$HOME/.local/opt/qemu-4.1.1/bin/qemu-system-riscv64" \
-  -L "$HOME/.local/opt/qemu-4.1.1/share/qemu" \
-  -machine virt -nographic -bios default \
-  -device loader,file=bin/ucore.img,addr=0x80200000
+sudo gdb -q "$QEMU_DEBUG" -p <QEMU_PID>
 ```
 
-两个调试命令文件直接展示断点、页表数据和检查结果，不生成报告目录下的附加文件。
+进入 GDB 后关闭分页，并避免 `SIGPIPE` 中断调试：
 
-#### 页表查询
+```gdb
+set pagination off
+handle SIGPIPE nostop noprint
+```
 
-默认构建的真实数据如下，修改代码或切换构建宏后应重新读取，不能沿用地址：
+本任务采用两种方式进行验证。一种使用已有 GDB 脚本完成 Sv39 页表查询和虚实地址内容比对；另一种直接使用宿主机 GDB 调试 QEMU 4.1.1 源码，逐步观察地址翻译和软件 TLB 的工作过程。两种方式选择的目标地址略有不同，因此下文分别记录。
 
-| 项目 | 本轮观察值 |
-|---|---|
-| guest 断点 PC | `0xffffffffc020123a`，`slub_init` |
-| `satp` | `0x8000000000080205` |
-| MODE / ASID | 8（Sv39）/ 0 |
-| 根页表物理地址 | `(satp & ((1ULL<<44)-1)) << 12 = 0x80205000` |
-| 选定 VA | `&kern_init = 0xffffffffc02000d6` |
-| VPN[2] / VPN[1] / VPN[0] | 511 / 1 / 0 |
-| 4 KiB 页内偏移 | `0xd6` |
-| 根层 PTE 地址 | `0x80205000 + 511*8 = 0x80205ff8` |
-| 根层 PTE | `0x00000000200000cf` |
-| PPN | `0x80000` |
+### 脚本化 Sv39 页表验证
 
-执行 `monitor xp /1gx 0x80205ff8` 得到上述 PTE。其 V、R、W、X、A、D 均为 1，U、G 为 0，W 与 R 的组合合法，保留高位为零。根层已经具备 R/X 权限，因此它是 level 2 叶子，覆盖 1 GiB，查询在此结束。PPN 的低 18 位为零，满足超级页物理对齐要求；此地址无需再读取下两级页表。
+脚本化验证选择 `kern_init` 作为目标地址。guest GDB 连接 QEMU 后读取 `satp`，按照 Sv39 地址格式计算根页表物理地址，并通过 QEMU monitor 读取实际页表项。
 
-物理地址按叶子层级组合：
+本轮观察到：
 
 ```text
-映射大小 = 1 << (12 + 9*2) = 0x40000000
-物理基址 = PPN << 12 = 0x80000000
-映射内偏移 = VA & 0x3fffffff = 0x002000d6
-PA = 0x80000000 | 0x002000d6 = 0x802000d6
+satp                  = 0x8000000000080205
+MODE                  = 8（Sv39）
+ASID                  = 0
+根页表物理地址          = 0x80205000
+选定虚拟地址            = 0xffffffffc02000d6
+VPN[2]                = 511
+VPN[1]                = 1
+VPN[0]                = 0
+4 KiB 页内偏移         = 0xd6
+根层 PTE 地址           = 0x80205ff8
+根层 PTE               = 0x00000000200000cf
+PPN                   = 0x80000
 ```
 
-#### 结果验证
+`satp` 可以拆分为：
 
-GDB 的 `x/8bx 0xffffffffc02000d6` 与 `monitor xp /8bx 0x802000d6` 均返回 `17 65 00 00 13 05 25 f4`。脚本逐字节比较虚拟读取与物理读取，并检查 `VA-0xffffffff40000000==PA`，实际输出 `[Sv39] REAL GDB WALK PASSED`。实际结果见本节截图。通用遍历脚本对非叶子继续按 PPN 查下一级，同时检查 V、W/R 合法性、超级页对齐及保留位；本轮真实内核只有这一层叶子路径，未伪造三级访问数据。
+```text
+satp = 0x8000000000080205
 
-#### QEMU 源码调试
+MODE = 8
+PPN  = 0x80205
+```
 
-依据课程分支指导书进一步执行 `tools/qemu_mmu.gdb`。实际调用路径为 `helper_lookup_tb_ptr` → `tb_htable_lookup` → `get_page_addr_code` → `tlb_fill` → `riscv_cpu_tlb_fill` → `get_physical_address`。在 QEMU `target/riscv/cpu_helper.c` 的 PTE 读取和叶子计算位置设置临时断点，观察到 `base=0x80205000`、`idx=511`、`pte_addr=0x80205ff8`、`pte=0x200000cf`、`ppn=0x80000`、`ptshift=18`，与 guest 手工遍历完全一致。
+其中 MODE 为 8，说明当前采用 Sv39 地址翻译。根页表物理地址为：
 
-通过两次 `next` 执行实际物理页计算后，输出页基址为 `0x80200000`。该函数为软件 TLB 生成 4 KiB 页基址，最终字节地址还需加 `0xd6`；`tlb_set_page` 实际收到 VA `0xffffffffc0200000`、PA `0x80200000`、prot=7、mmu_idx=1、size=`0x1000`。随后在 `accel/tcg/cputlb.c:1030` 再次停下，观察到 `entry->addr_code=0xffffffffc0200000`，`next` 直接到 1039 行，跳过 miss 分支和页表遍历，实际验证 TLB 命中。
+```text
+root_pa = PPN << 12
+        = 0x80205 << 12
+        = 0x80205000
+```
 
-另外在复位阶段的 M 模式访问断下，地址 `0x1000`、satp=0、priv=3，翻译直接返回物理地址 `0x1000`。即使这一阶段不查 Sv39 页表，QEMU 仍经过其软件 TLB 缓存路径。第一次尝试打印循环变量 `i` 时出现 `value has been optimized out`；改为查看仍可观察的 PPN、ptshift 和实际输出指针，重新执行后输出 `[QEMU MMU] REAL HOST DEBUG PASSED`。
+对于目标虚拟地址：
 
-本轮实际调试截图如下，包含 satp、根层 PTE、超级页物理地址与字节比对结果；QEMU 主机端观察值及分析已整理在上文。
+```text
+VA = 0xffffffffc02000d6
+```
 
-![图 4.4：Sv39 页表查询与地址验证](./images/sv39-gdb-results.png)
+最高一级索引为：
 
-图 4.4：真实终端截图。`satp=0x8000000000080205`，根层叶子 PTE 为 `0x200000cf`，选定虚拟地址转换为 `0x802000d6`，虚拟地址与物理地址读取的字节完全一致，最终输出 `[Sv39] REAL GDB WALK PASSED`。
+```text
+VPN[2] = (VA >> 30) & 0x1ff
+       = 0x1ff
+       = 511
+```
+
+因此根层 PTE 地址为：
+
+```text
+0x80205000 + 511 * 8
+= 0x80205ff8
+```
+
+读取该位置得到：
+
+```text
+PTE = 0x00000000200000cf
+PPN = 0x80000
+```
+
+该 PTE 的 `V、R、W、X` 位均有效，因此它不是指向下一级页表的非叶子项，而是在 Sv39 最高一级直接形成叶子映射。此时页表查询提前结束，对应一个 1 GiB superpage。
+
+Sv39 虽然是三级页表结构，但并不要求每一次地址转换都必须访问完整的三级页表。当较高层 PTE 已经是合法叶子项时，可以直接形成大页映射并结束 page walk。
+
+对应物理地址计算如下：
+
+```text
+映射大小 = 1 << (12 + 9 * 2)
+         = 0x40000000
+
+物理基址 = PPN << 12
+         = 0x80000000
+
+映射内偏移 = VA & 0x3fffffff
+           = 0x002000d6
+
+PA = 0x80000000 | 0x002000d6
+   = 0x802000d6
+```
+
+脚本随后分别读取虚拟地址 `0xffffffffc02000d6` 和物理地址 `0x802000d6` 处的内容，两者得到相同的字节序列，并输出：
+
+```text
+[Sv39] REAL GDB WALK PASSED
+```
+
+说明脚本化页表查询和虚实地址对应关系验证成功。
+
+![图 4.4-1：脚本化 Sv39 页表查询与地址验证](./images/sv39-gdb-results.png)
+
+图 4.4-1 展示了组内原有脚本验证结果，其中包括 `satp`、根层 PTE、超级页地址转换以及虚实地址内容比对。
+
+### QEMU 源码手工调试
+
+在脚本化验证基础上，进一步使用宿主机原生 GDB 附加带调试信息的 QEMU 4.1.1，手工跟踪一次真实的地址翻译过程。
+
+首先在 QEMU 的：
+
+```text
+target/riscv/cpu_helper.c
+```
+
+中对：
+
+```c
+riscv_cpu_tlb_fill()
+```
+
+设置断点。
+
+第一次命中时观察到：
+
+```text
+address     = 0x1000
+mmu_idx     = 3
+access_type = MMU_INST_FETCH
+```
+
+这是系统复位后的早期 M-mode 取指，并非本次主要观察的 Sv39 内核虚拟地址。
+
+随后对断点增加内核高地址条件：
+
+```gdb
+condition 1 address >= 0xffffffffc0200000 && address < 0xffffffffc0300000
+```
+
+再次继续执行后命中：
+
+```text
+address     = 0xffffffffc02000d8
+mmu_idx     = 1
+access_type = MMU_INST_FETCH
+```
+
+该地址正是本轮内核构建得到的 `entry` 地址，说明此时已经开始在 S-mode 下访问 uCore 内核高虚拟地址。
+
+![图 4.4-2：QEMU 捕获 uCore 内核虚拟地址翻译](./images/01-sv39-tlb-miss-entry.png)
+
+### Sv39 根页表定位
+
+进入：
+
+```c
+get_physical_address()
+```
+
+后读取当前 `satp`：
+
+```text
+satp = 0x8000000000080205
+```
+
+进一步拆分：
+
+```text
+MODE = satp >> 60
+     = 0x8
+
+PPN = satp & 0xfffffffffff
+    = 0x80205
+```
+
+因此当前地址翻译模式为 Sv39，根页表物理地址为：
+
+```text
+0x80205 << 12
+= 0x80205000
+```
+
+![图 4.4-3：satp 与 Sv39 根页表地址](./images/02-satp-sv39-root-page-table.png)
+
+在 QEMU 4.1.1 的 `get_physical_address()` 中，Sv39 对应：
+
+```c
+case VM_1_10_SV39:
+    levels = 3;
+    ptidxbits = 9;
+    ptesize = 8;
+    break;
+```
+
+即最多进行三级页表查询，每一级使用 9 位 VPN 索引，每个 PTE 占 8 字节。
+
+### 根层 PTE 查询
+
+针对当前手工调试的虚拟地址：
+
+```text
+VA = 0xffffffffc02000d8
+```
+
+计算最高一级页表索引：
+
+```text
+VPN[2] = (VA >> 30) & 0x1ff
+       = 0x1ff
+```
+
+因此根层 PTE 地址为：
+
+```text
+0x80205000 + 0x1ff * 8
+= 0x80205ff8
+```
+
+在 QEMU 页表遍历循环中设置源码断点，实际观察到：
+
+```text
+i        = 0
+ptshift  = 18
+base     = 0x80205000
+idx      = 0x1ff
+pte_addr = 0x80205ff8
+```
+
+与手工计算结果完全一致。
+
+![图 4.4-4：QEMU 实际计算根层 PTE 地址](./images/03-root-pte-address.png)
+
+QEMU 随后执行：
+
+```c
+target_ulong pte = ldq_phys(cs->as, pte_addr);
+target_ulong ppn = pte >> PTE_PPN_SHIFT;
+```
+
+从模拟物理内存读取实际 PTE。
+
+本轮观察到：
+
+```text
+pte       = 0x200000cf
+ppn       = 0x80000
+pte & 0xf = 0xf
+```
+
+最低四位对应：
+
+```text
+V = 1
+R = 1
+W = 1
+X = 1
+```
+
+说明该 PTE 已经是一个合法叶子项。
+
+同时：
+
+```text
+i       = 0
+ptshift = 18
+```
+
+表明页表遍历在最高一级就结束，因此形成 1 GiB superpage 映射，不需要继续访问第二级和第三级页表。
+
+![图 4.4-5：根层叶子 PTE 与超级页映射](./images/04-root-leaf-pte-superpage.png)
+
+### 虚拟地址到物理地址
+
+对于该超级页叶子，QEMU 使用：
+
+```c
+target_ulong vpn = addr >> PGSHIFT;
+*physical = (ppn | (vpn & ((1L << ptshift) - 1))) << PGSHIFT;
+```
+
+进行物理地址计算。
+
+实际调试得到：
+
+```text
+*physical = 0x80200000
+```
+
+这里的 `*physical` 是物理页基址。
+
+原虚拟地址为：
+
+```text
+0xffffffffc02000d8
+```
+
+最低 12 位页内偏移为：
+
+```text
+0xd8
+```
+
+因此实际访问的完整物理地址为：
+
+```text
+0x80200000 + 0xd8
+= 0x802000d8
+```
+
+即：
+
+```text
+0xffffffffc02000d8
+        |
+        | Sv39
+        v
+0x00000000802000d8
+```
+
+![图 4.4-6：QEMU 地址翻译得到物理页基址](./images/05-qemu-physical-page-result.png)
+
+该结果与 uCore 被加载到 `0x80200000` 附近的实际内存布局一致。
+
+### QEMU 软件 TLB refill
+
+页表翻译成功后，`riscv_cpu_tlb_fill()` 调用：
+
+```c
+tlb_set_page(cs,
+             address & TARGET_PAGE_MASK,
+             pa & TARGET_PAGE_MASK,
+             prot,
+             mmu_idx,
+             TARGET_PAGE_SIZE);
+```
+
+实际观察到传入的软件 TLB 映射信息为：
+
+```text
+address                = 0xffffffffc02000d8
+pa                     = 0x80200000
+
+vaddr_page             = 0xffffffffc0200000
+paddr_page             = 0x80200000
+
+prot                   = 0x7
+mmu_idx                = 1
+```
+
+随后进入：
+
+```text
+accel/tcg/cputlb.c
+```
+
+中的：
+
+```c
+tlb_set_page_with_attrs()
+```
+
+QEMU 首先获得当前模拟 CPU 的软件 TLB：
+
+```c
+CPUArchState *env = cpu->env_ptr;
+CPUTLB *tlb = env_tlb(env);
+CPUTLBDesc *desc = &tlb->d[mmu_idx];
+```
+
+然后将虚拟地址和物理地址按目标页对齐：
+
+```c
+vaddr_page = vaddr & TARGET_PAGE_MASK;
+paddr_page = paddr & TARGET_PAGE_MASK;
+```
+
+再通过：
+
+```c
+index = tlb_index(env, mmu_idx, vaddr_page);
+te = tlb_entry(env, mmu_idx, vaddr_page);
+```
+
+定位对应的软件 TLB 表项。
+
+本轮实际观察到：
+
+```text
+vaddr_page = 0xffffffffc0200000
+paddr_page = 0x80200000
+index      = 0
+```
+
+QEMU 随后构造临时表项 `tn`：
+
+```c
+tn.addend = addend - vaddr_page;
+
+if (prot & PAGE_READ) {
+    tn.addr_read = address;
+}
+
+if (prot & PAGE_EXEC) {
+    tn.addr_code = code_address;
+}
+```
+
+对于可写页面，还设置：
+
+```c
+tn.addr_write
+```
+
+最后通过：
+
+```c
+copy_tlb_helper_locked(te, &tn);
+```
+
+将构造完成的临时表项写入正式 `CPUTLBEntry`。
+
+调试中观察到：
+
+```text
+tn.addr_read  = 0xffffffffc0200000
+tn.addr_write = 0xffffffffc0200400
+tn.addr_code  = 0xffffffffc0200000
+
+te->addr_read  = 0xffffffffc0200000
+te->addr_write = 0xffffffffc0200400
+te->addr_code  = 0xffffffffc0200000
+```
+
+并且 `tn.addend` 与 `te->addend` 相同，说明新构造的软件 TLB 表项已经成功复制到正式表项中。
+
+![图 4.4-7：QEMU 软件 TLB refill](./images/06-qemu-software-tlb-refill.png)
+
+其中：
+
+```text
+te->addr_write = 0xffffffffc0200400
+```
+
+比页基址多出的 `0x400` 并不是地址偏移。
+
+QEMU 源码定义：
+
+```c
+#define TLB_NOTDIRTY (1 << (TARGET_PAGE_BITS - 2))
+```
+
+当前：
+
+```text
+TARGET_PAGE_BITS = 12
+```
+
+所以：
+
+```text
+TLB_NOTDIRTY = 1 << 10
+             = 0x400
+```
+
+因此：
+
+```text
+0xffffffffc0200400
+=
+0xffffffffc0200000 | TLB_NOTDIRTY
+```
+
+说明 QEMU 会利用 TLB 地址字段的部分低位保存软件模拟所需的状态标志。
+
+### 软件 TLB lookup 与命中
+
+进一步检查：
+
+```text
+include/exec/cpu-all.h
+```
+
+可以找到 QEMU 软件 TLB 的基本命中判断：
+
+```c
+static inline bool tlb_hit_page(target_ulong tlb_addr,
+                                target_ulong addr)
+{
+    return addr ==
+        (tlb_addr & (TARGET_PAGE_MASK | TLB_INVALID_MASK));
+}
+
+static inline bool tlb_hit(target_ulong tlb_addr,
+                           target_ulong addr)
+{
+    return tlb_hit_page(tlb_addr,
+                        addr & TARGET_PAGE_MASK);
+}
+```
+
+`tlb_hit()` 首先使用 `TARGET_PAGE_MASK` 去掉当前访问地址的页内偏移，再与 TLB 表项中保存的虚拟页标识进行比较。两者匹配则表示 TLB hit。
+
+在 `accel/tcg/cputlb.c` 中可以看到 miss 路径：
+
+```c
+if (!tlb_hit(tlb_addr, addr)) {
+    if (!VICTIM_TLB_HIT(addr_write, addr)) {
+        tlb_fill(env_cpu(env), addr, 1 << s_bits,
+                 MMU_DATA_STORE, mmu_idx, retaddr);
+    }
+}
+```
+
+因此 QEMU 的软件 TLB 查找过程可以概括为：
+
+```text
+主 TLB lookup
+        |
+        +-- hit
+        |     |
+        |     v
+        |   快速访问
+        |
+        +-- miss
+              |
+              v
+        victim TLB lookup
+              |
+              +-- hit
+              |     |
+              |     v
+              |   使用缓存结果
+              |
+              +-- miss
+                    |
+                    v
+                 tlb_fill()
+                    |
+                    v
+            riscv_cpu_tlb_fill()
+                    |
+                    v
+           get_physical_address()
+                    |
+                    v
+              Sv39 page walk
+                    |
+                    v
+                TLB refill
+```
+
+对于命中的情况，QEMU 可以直接利用：
+
+```c
+hostaddr = (void *)((uintptr_t)addr + tlbe->addend);
+```
+
+计算 QEMU 宿主进程中对应 RAM 的地址，不需要再次执行 Sv39 页表查询。
+
+### QEMU 地址翻译调用路径
+
+第一次在 `riscv_cpu_tlb_fill()` 处停止时，通过 GDB 的 `bt` 可以观察到 QEMU 执行路径中的部分调用关系：
+
+```text
+tb_find
+    |
+    v
+tb_lookup__cpu_state
+    |
+    v
+tb_htable_lookup
+    |
+    v
+get_page_addr_code
+    |
+    v
+tlb_fill
+    |
+    v
+riscv_cpu_tlb_fill
+    |
+    v
+get_physical_address
+```
+
+其中 `riscv_cpu_tlb_fill()` 是 RISC-V 目标相关的 TLB fill 入口，`get_physical_address()` 则完成 RISC-V 页表格式对应的地址翻译。
+
+地址翻译成功后继续进入：
+
+```text
+tlb_set_page
+    |
+    v
+tlb_set_page_with_attrs
+    |
+    v
+tlb_index / tlb_entry
+    |
+    v
+构造 CPUTLBEntry
+    |
+    v
+copy_tlb_helper_locked
+```
+
+从而完成 QEMU 软件 TLB 的 refill。
+
+### QEMU 软件 TLB 与真实 CPU TLB 的比较
+
+真实 CPU 中的 TLB 是硬件结构，其主要作用是缓存虚拟页到物理页的转换结果以及相应权限信息。
+
+真实 CPU 的基本过程为：
+
+```text
+CPU 发出虚拟地址
+        |
+        v
+TLB lookup
+        |
+        +-- hit --> 直接得到地址翻译结果
+        |
+        +-- miss --> page walk
+                        |
+                        v
+                    查询页表
+                        |
+                        v
+                    refill TLB
+```
+
+QEMU 没有真实的 RISC-V MMU 和硬件 TLB，因此使用 `CPUTLB`、`CPUTLBEntry`、`tlb_hit()`、`tlb_fill()` 等 C 数据结构和函数模拟这一过程。
+
+两者在逻辑上都遵循：
+
+```text
+TLB lookup
+    |
+    +-- hit --> 使用缓存
+    |
+    +-- miss --> 查询页表
+                    |
+                    v
+                得到翻译结果
+                    |
+                    v
+                refill TLB
+```
+
+但 QEMU 作为软件模拟器，在得到 guest 的地址转换结果之后，还必须进一步找到宿主机中实际存放该 RAM 的地址。因此 QEMU 的 TLB 表项还保存了 `addend`、MMIO 标志、dirty 状态等软件模拟所需的信息。
+
+例如：
+
+```c
+hostaddr = (void *)((uintptr_t)addr + tlbe->addend);
+```
+
+反映的就是 QEMU 在 TLB hit 后直接从 guest 虚拟地址快速得到宿主机内存地址的实现方式。
+
+因此，QEMU 软件 TLB 与真实 CPU TLB 在功能目标上相同，但具体数据结构和实现方式并不是硬件 TLB 的简单复制。
+
+### 小结
+
+本任务通过脚本化验证和 QEMU 源码手工调试两种方式观察了 Sv39 地址翻译和 TLB 工作过程。
+
+脚本化验证以 `kern_init` 为目标，读取 `satp`、根层 PTE，并完成虚拟地址与物理地址内容的一致性检查，最终输出：
+
+```text
+[Sv39] REAL GDB WALK PASSED
+```
+
+手工调试则以内核入口：
+
+```text
+0xffffffffc02000d8
+```
+
+为目标，在 QEMU 4.1.1 源码中依次观察：
+
+```text
+riscv_cpu_tlb_fill
+        |
+        v
+get_physical_address
+        |
+        v
+satp / Sv39
+        |
+        v
+根页表
+        |
+        v
+VPN[2]
+        |
+        v
+根层叶子 PTE
+        |
+        v
+1 GiB superpage
+        |
+        v
+物理页 0x80200000
+        |
+        v
+tlb_set_page
+        |
+        v
+软件 TLB refill
+        |
+        v
+tlb_hit / victim TLB / tlb_fill
+```
+
+两种验证方式得到的页表结构一致。当前 uCore 的高地址内核映射在 Sv39 根层即命中合法叶子项，形成 1 GiB superpage。地址翻译成功后，QEMU 将对应的虚拟页和物理页信息写入软件 TLB，之后相同页上的访问若 TLB 命中即可跳过页表遍历，从而模拟真实处理器利用 TLB 加速虚拟地址转换的过程。
 
 ---
 
