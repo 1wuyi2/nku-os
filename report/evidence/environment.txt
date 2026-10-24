@@ -1,0 +1,20 @@
+2026-10-24T22:28:54+08:00
+fatal: not a git repository (or any of the parent directories): .git
+QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)
+Copyright (c) 2003-2023 Fabrice Bellard and the QEMU Project developers
+riscv64-unknown-elf-gcc (13.2.0-11ubuntu1+12) 13.2.0
+Copyright (C) 2023 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+GNU gdb (Ubuntu 15.1-1ubuntu1~24.04.1) 15.1
+Copyright (C) 2024 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+Package pixman-1 was not found in the pkg-config search path.
+Perhaps you should add the directory containing `pixman-1.pc'
+to the PKG_CONFIG_PATH environment variable
+Package 'pixman-1', required by 'virtual:world', not found
+/usr/bin/ninja
+32

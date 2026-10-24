@@ -1,0 +1,4 @@
+# Preserve whitespace in raw terminal logs and archived unified diffs.
+report/evidence/*.log -text -whitespace
+report/evidence/*.patch -text -whitespace
+report/evidence/original-task.txt -text -whitespace

@@ -1,0 +1,64 @@
+$ make qemu QEMU=/home/wlz/.local/opt/qemu-4.1.1/bin/qemu-system-riscv64 -L /home/wlz/.local/opt/qemu-4.1.1/share/qemu DEFS=-DUSE_BUDDY -DSLUB_SELFTEST
+
+OpenSBI v0.4 (Jul  2 2019 11:53:53)
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name          : QEMU Virt Machine
+Platform HART Features : RV64ACDFIMSU
+Platform Max HARTs     : 8
+Current Hart           : 0
+Firmware Base          : 0x80000000
+Firmware Size          : 112 KB
+Runtime SBI Version    : 0.1
+
+PMP0: 0x0000000080000000-0x000000008001ffff (A)
+PMP1: 0x0000000000000000-0xffffffffffffffff (A,R,W,X)
+DTB Init
+HartID: 0
+DTB Address: 0x82200000
+Physical Memory from DTB:
+  Base: 0x0000000080000000
+  Size: 0x0000000008000000 (128 MB)
+  End:  0x0000000087ffffff
+DTB init completed
+(THU.CST) os is loading ...
+Special kernel symbols:
+  entry  0xffffffffc02000d6 (virtual)
+  etext  0xffffffffc0203fb2 (virtual)
+  edata  0xffffffffc020a018 (virtual)
+  end    0xffffffffc020c44c (virtual)
+Kernel executable memory footprint: 49KB
+memory management: buddy_pmm_manager
+[Buddy] initial free pages: 31923
+[Buddy Test 1] unaligned 61-page range: PASS
+[Buddy Test 2] rounding 3->4, 5->8 and data isolation: PASS
+[Buddy Test 3] split and recursive merge to 64 pages: PASS
+[Buddy Test 4] different orders do not merge prematurely: PASS
+[Buddy Test 5] fragmented 32 free pages reject 2-page request: PASS
+[Buddy Test 6] zero, oversized and overflow requests: PASS
+[Buddy Test 7] 512-operation stress: PASS (195 alloc, 131 failures)
+[Buddy Test 8] real memory restored: PASS (31923 -> 31923 pages)
+[Buddy] ALL 8 TESTS PASSED
+check_alloc_page() succeeded!
+satp virtual address: 0xffffffffc0209000
+satp physical address: 0x0000000080209000
+[SLUB Test 1] Initialization: PASS
+[SLUB Test 2] Eight 16-byte objects share one page: PASS
+[SLUB Test 3] Eight classes, rounding and alignment: PASS
+[SLUB Test 4] Data isolation across caches: PASS
+[SLUB Test 5] Freed slots reused, neighbours intact: PASS
+[SLUB Test 6] 600 objects, full/partial/empty transitions: PASS (capacity=248)
+[SLUB Test 7] Zero, oversized, overflow and real PMM exhaustion: PASS
+[SLUB Test 8] All physical pages reclaimed: PASS (31923 -> 31923)
+[SLUB Test 9] 1024-operation stress: PASS (528 alloc, 496 free, seed=2411302)
+[SLUB Test 10] Large objects through 64 KiB, all bytes checked: PASS
+[SLUB Test 11] Invalid, interior, metadata and double frees rejected: PASS
+[SLUB] ALL TESTS PASSED
+qemu-system-riscv64: terminating on signal 15 from pid 22085 (make)

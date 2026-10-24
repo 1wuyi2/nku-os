@@ -1,0 +1,11 @@
+Remote baseline: dc81539ea2af1312732fe07d442c38dd68154212
+Implementation commit: 403d43ee10525a244a45cd1ef271c060c369b80e
+Validation runs in an isolated copy of the actual publishing checkout.
+slub: PASS
+default: PASS
+official grade: 20/20
+buddy-slub: PASS
+default-final: PASS
+all configurations validated; default build restored
+Sv39 guest GDB walk: PASS
+PASS: screenshots match saved SLUB/Sv39 values; original PNG files copied unchanged.

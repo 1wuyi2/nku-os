@@ -33,8 +33,8 @@
 - [x] 功能模块二任务一：理解 First-Fit 连续物理内存分配算法 —— 谭锦睿
 - [x] 功能模块二任务二：实现 Best-Fit 连续物理内存分配算法 —— 谭锦睿
 - [x] 功能模块二任务三：Buddy System 分配算法 —— 黄奕浩
-- 功能模块二扩展任务 Challenge：任意大小内存单元 SLUB 分配算法 —— 待对应负责人完成后补充。
-- 分支任务：GDB 调试页表查询过程 —— 待三人共同完成后补充。
+- [x] 功能模块二扩展任务 Challenge：任意大小内存单元 SLUB 分配算法 —— 王乐之（2026-10-24 完成）
+- [x] 分支任务：GDB 调试页表查询过程 —— 已保存实际 guest/host 调试证据（2026-10-24）
 
 
 ### 报告分工
@@ -89,7 +89,7 @@
 |---|---|---|---|
 | 2412771-谭锦睿 | Codex | GPT-5 | `page_init()` 与 Best-Fit 的 Prompt 设计、源码核对和测试辅助 |
 | 2413581-黄奕浩 | Codex | GPT-6 | Buddy System 分配模块、测试设计与源码核对 |
-| 2411302-王乐之 | 待对应负责人补充 | — | SLUB 模块与测试 |
+| 2411302-王乐之 | Codex | GPT-6 | SLUB 模块、测试、回归验证及实际 GDB 调试 |
 
 ---
 
@@ -465,7 +465,57 @@ make qemu DEFS=-DUSE_BUDDY
 
 **负责人：2411302-王乐之**
 
-待对应负责人完成后补充。
+#### 实验目的
+
+在现有页级 PMM 上增加对象级分配，支持任意正整数大小请求。2026-10-24 完成 `slub.c`、`slub.h`、`slub_test.c`，在 `kern_init()` 的 `pmm_init()` 之后接入。默认仍使用 Best-Fit，定义 `USE_BUDDY` 时仍使用原 Buddy；SLUB 只调用统一的页分配接口。原 `page_init()`、三个 PMM 源文件、官方评分、Makefile、启动汇编和链接脚本均未修改。
+
+#### 数据结构
+
+`struct slub_cache` 保存对象大小、Slab 数、活动对象数以及 partial/full 双向链表。八种缓存的对象大小依次为 16、32、64、128、256、512、1024、2048 字节，非标准请求向上匹配。当前接口保证至少 16 字节对齐。
+
+`struct slab` 放在本 Slab 的物理页开头，保存活动块链表节点、缓存状态节点、所属缓存、PMM 页指针、原始请求页数 `npages`、实际占用页数 `charged`、容量、使用数、请求长度、空闲对象头和 256 位分配位图。RV64 下页头为 128 字节，已按 16 字节对齐。小 Slab 使用一页，槽位从页头之后开始，容量为 `(4096-128)/对象大小`；16 字节缓存每页可放 248 个对象，2048 字节缓存每页放一个对象。对象槽位不包含页头。
+
+页内元数据不依赖 SLUB 递归分配，也不复用 `Page.ref`、`flags`、`property`、`page_link`。这些字段继续由 PMM 管理，尤其 Buddy 块头保存了分配标志及原始请求数。全局 `active` 链表登记所有仍由 SLUB 持有的小 Slab 和大对象块，便于释放时先核对归属。
+
+#### 初始化
+
+`slub_init()` 初始化活动链表、各缓存尺寸和 partial/full 链表，静态计数初值为零；重复调用直接返回，保留已存在的活动对象。调用顺序为 `pmm_init()` → `slub_init()` → 条件执行 `slub_check()`。因此官方 PMM 自检先完成，SLUB 初始化期间也不消耗物理页。Makefile 自动收集 `kern/mm` 源码，无须修改构建规则。
+
+#### 分配过程
+
+`slub_alloc()` 对零请求返回 NULL。对于不超过 2048 字节的请求，先选取最小可容纳缓存，从 partial 链表取 Slab；没有可用 Slab 时调用 `new_slab()`，通过 `alloc_pages(1)` 获得页面，再用 `page2pa(page)+va_pa_offset` 取得内核虚拟地址。
+
+创建 Slab 时从高槽位向低槽位建立单向空闲链表，空闲对象的首个指针位置保存下一对象地址。实际分配取出链首并设置位图，递增 Slab 和缓存对象计数；取走最后一个空闲对象时，将节点从 partial 移入 full。活动对象的数据区域全部归调用者使用，空闲链表指针只写在已释放槽位内。
+
+超过 2048 字节的请求经大对象路径执行：检查 `size+HEADER_SIZE+PGSIZE-1` 溢出，再计算所需连续页数并调用 `alloc_pages(npages)`，返回页头后面的地址。该路径没有额外的 64 KiB 固定上限，实际成功范围由可表示大小和连续物理内存决定；64 KiB 是本轮逐字节验证的最大测试请求。Buddy 可能把请求页数向二次幂取整，所以用 PMM 前后空闲页差值记录 `charged`，保留 `npages` 供释放时传入，避免破坏 Buddy 的接口约定。
+
+关键计算与实际代码一致：
+
+```c
+if (size > (size_t)-1 - HEADER_SIZE - (PGSIZE - 1)) {
+    return NULL;
+}
+size_t npages = cache ? 1 : (size + HEADER_SIZE + PGSIZE - 1) / PGSIZE;
+/* Buddy 的实际占用页数可能大于 npages。 */
+s->charged = before - nr_free_pages();
+```
+
+#### 释放过程
+
+`slub_free()` 返回布尔成功状态，NULL 为成功的空操作。`find_object()` 遍历可信活动块，只比较传入地址；小对象必须落在槽位边界且位图仍标记为活动，大对象必须等于起始地址。非法、内部、页头以及当前已释放的指针返回失败，拒绝时不改变分配状态，也不会直接解引用无效指针。
+
+合法小对象释放后清除位图、写回空闲链表并减少计数。原 Slab 为 full 时先移回 partial；如果使用数降至零，则摘除状态链表和活动登记，保存 PMM 页指针及原始页数后调用 `free_pages()`。empty 状态只在创建和最后一次释放时短暂存在，当前策略不保留空 Slab。大对象从登记表摘除后直接按原始页数归还 PMM。归还之后不再访问页内元数据。
+
+`slub_validate()` 检查链表双向连接、活动登记和状态链表交叉关系、各缓存计数、位图与空闲链表的完整互补、full/partial 条件、物理块不重叠及 PMM 页状态。`slub_get_stats()` 提供 Slab、partial、full、大对象、活动对象和实际占用页数，便于测试核对回收。
+
+#### Prompt
+
+本次采用一份总任务连续开发，以下两份文档由总任务整理，是实际实现和测试的完整子规格，没有发生两次独立的模型调用：
+
+- [SLUB 实现 Prompt](./prompt_slub_impl.md)：规定真实依赖、八缓存、独立页头、位图、状态链表、大对象、释放防护及 PMM 兼容约束。
+- [SLUB 测试 Prompt](./prompt_slub_test.md)：规定十一组实际内核测试、逐操作一致性检查、真实耗尽构造和回归标准。
+
+两份文档均采用 `[PROMPT]`、`[RELY]`、`[GUARANTEE]`、`[SPECIFICATION]` 四段结构。原始总任务、环境处理和调试命令修正过程见 [开发记录](./development.md)。
 
 ---
 
@@ -490,7 +540,70 @@ make qemu DEFS=-DUSE_BUDDY
 
 **负责人：三人共同完成**
 
-待对应负责人完成后补充。
+#### 调试环境
+
+本轮在 2026-10-24 实际执行内核端和 QEMU 主机端两种 GDB 调试。系统 QEMU 为 8.2.2，因此从官方源码本地构建并使用 QEMU 4.1.1，二进制位于 `/home/wlz/.local/opt/qemu-4.1.1/bin/qemu-system-riscv64`；`-L` 指定同目录下 `share/qemu` 的固件。构建保留 `-O2 -g` 调试信息，没有替换系统安装或修改工程 Makefile。
+
+`make debug` 使用 `-s -S` 在 localhost:1234 监听并从复位状态暂停，内核 ELF 为 `code/bin/kernel`。`entry.S` 在跳转 `kern_init` 前写入 `satp` 并执行 `sfence.vma`。本轮 guest GDB 在 `slub_init()` 入口断下，此时 PMM 初始化及自检已经完成。QEMU monitor 的 `xp` 支持物理地址读取。
+
+复现命令如下，需先恢复默认构建；`validate_slub.py` 结束时已经完成此步骤：
+
+```bash
+cd /home/wlz/nku-os-lab2/nku-os-lab2/code
+QEMU_LAB2="$HOME/.local/opt/qemu-4.1.1/bin/qemu-system-riscv64 -L $HOME/.local/opt/qemu-4.1.1/share/qemu"
+python3 tools/debug_sv39.py --qemu "$QEMU_LAB2"
+python3 tools/debug_qemu_mmu.py \
+  --qemu "$HOME/.local/opt/qemu-4.1.1/bin/qemu-system-riscv64" \
+  --bios-dir "$HOME/.local/opt/qemu-4.1.1/share/qemu"
+```
+
+第一个脚本实际启动 `make debug`，再执行 `gdb-multiarch -q -batch -x tools/sv39.gdb`。核心命令为 `file bin/kernel`、`target remote localhost:1234`、`break slub_init`、`continue`、`info registers pc satp` 和 `monitor xp`。第二个脚本用主机原生 `gdb` 启动含调试信息的 QEMU，条件断点地址从当前 ELF 的 `kern_init` 符号动态取得，无须 sudo 或附加到外部进程。
+
+#### 页表查询
+
+默认构建的真实数据如下，修改代码或切换构建宏后应重新读取，不能沿用地址：
+
+| 项目 | 本轮观察值 |
+|---|---|
+| guest 断点 PC | `0xffffffffc020123a`，`slub_init` |
+| `satp` | `0x8000000000080205` |
+| MODE / ASID | 8（Sv39）/ 0 |
+| 根页表物理地址 | `(satp & ((1ULL<<44)-1)) << 12 = 0x80205000` |
+| 选定 VA | `&kern_init = 0xffffffffc02000d6` |
+| VPN[2] / VPN[1] / VPN[0] | 511 / 1 / 0 |
+| 4 KiB 页内偏移 | `0xd6` |
+| 根层 PTE 地址 | `0x80205000 + 511*8 = 0x80205ff8` |
+| 根层 PTE | `0x00000000200000cf` |
+| PPN | `0x80000` |
+
+执行 `monitor xp /1gx 0x80205ff8` 得到上述 PTE。其 V、R、W、X、A、D 均为 1，U、G 为 0，W 与 R 的组合合法，保留高位为零。根层已经具备 R/X 权限，因此它是 level 2 叶子，覆盖 1 GiB，查询在此结束。PPN 的低 18 位为零，满足超级页物理对齐要求；此地址无需再读取下两级页表。
+
+物理地址按叶子层级组合：
+
+```text
+映射大小 = 1 << (12 + 9*2) = 0x40000000
+物理基址 = PPN << 12 = 0x80000000
+映射内偏移 = VA & 0x3fffffff = 0x002000d6
+PA = 0x80000000 | 0x002000d6 = 0x802000d6
+```
+
+#### 结果验证
+
+GDB 的 `x/8bx 0xffffffffc02000d6` 与 `monitor xp /8bx 0x802000d6` 均返回 `17 65 00 00 13 05 25 f4`。脚本逐字节比较虚拟读取与物理读取，并检查 `VA-0xffffffff40000000==PA`，实际输出 `[Sv39] REAL GDB WALK PASSED`。完整记录为 [guest GDB 日志](./evidence/sv39-gdb.log)，串口记录为 [调试启动日志](./evidence/sv39-qemu.log)。通用遍历脚本对非叶子继续按 PPN 查下一级，同时检查 V、W/R 合法性、超级页对齐及保留位；本轮真实内核只有这一层叶子路径，未伪造三级访问数据。
+
+#### QEMU 源码调试
+
+依据课程分支指导书进一步执行 `tools/qemu_mmu.gdb`。实际调用路径为 `helper_lookup_tb_ptr` → `tb_htable_lookup` → `get_page_addr_code` → `tlb_fill` → `riscv_cpu_tlb_fill` → `get_physical_address`。在 QEMU `target/riscv/cpu_helper.c` 的 PTE 读取和叶子计算位置设置临时断点，观察到 `base=0x80205000`、`idx=511`、`pte_addr=0x80205ff8`、`pte=0x200000cf`、`ppn=0x80000`、`ptshift=18`，与 guest 手工遍历完全一致。
+
+通过两次 `next` 执行实际物理页计算后，输出页基址为 `0x80200000`。该函数为软件 TLB 生成 4 KiB 页基址，最终字节地址还需加 `0xd6`；`tlb_set_page` 实际收到 VA `0xffffffffc0200000`、PA `0x80200000`、prot=7、mmu_idx=1、size=`0x1000`。随后在 `accel/tcg/cputlb.c:1030` 再次停下，观察到 `entry->addr_code=0xffffffffc0200000`，`next` 直接到 1039 行，跳过 miss 分支和页表遍历，实际验证 TLB 命中。
+
+另外在复位阶段的 M 模式访问断下，地址 `0x1000`、satp=0、priv=3，翻译直接返回物理地址 `0x1000`。即使这一阶段不查 Sv39 页表，QEMU 仍经过其软件 TLB 缓存路径。完整记录为 [QEMU 主机 GDB 日志](./evidence/qemu-mmu-gdb.log)。第一次尝试打印被优化的循环变量 `i` 失败，原始日志保存在 `qemu-mmu-gdb-first-attempt.log`；删除冗余打印后重新执行成功，最终标记为 `[QEMU MMU] REAL HOST DEBUG PASSED`。
+
+用户在本地终端执行调试后提供的真实截图如下，图中 satp、根层 PTE、超级页物理地址与字节比对结果均与本轮日志一致。QEMU 主机端源码调试的详细过程保留在原始日志中。
+
+![图 4.4：Sv39 页表查询与地址验证](./images/sv39-gdb-results.png)
+
+图 4.4：真实终端截图。`satp=0x8000000000080205`，根层叶子 PTE 为 `0x200000cf`，选定虚拟地址转换为 `0x802000d6`，虚拟地址与物理地址读取的字节完全一致，最终输出 `[Sv39] REAL GDB WALK PASSED`。
 
 ---
 
@@ -587,7 +700,61 @@ check_alloc_page() succeeded!
 
 ## 5.5 SLUB 自定义测试
 
-待对应负责人完成后补充。
+**负责人：2411302-王乐之。本轮实际验证日期：2026-10-24。**
+
+#### 测试设计
+
+测试位于 `kern/mm/slub_test.c`，仅在定义 `SLUB_SELFTEST` 时编译测试体并从 `kern_init()` 调用。所有 PASS 均位于对应断言之后。各组清理后调用 `verify_restored()`，要求所有 Slab/大对象登记和统计归零、内部结构一致，且真实 `nr_free_pages()` 恢复初值。
+
+| 测试 | 操作与检查条件 | Best-Fit / Buddy 上层结果 |
+|---|---|---|
+| 1 初始化 | 八缓存尺寸、空链表、零统计、重复初始化不占页 | PASS / PASS |
+| 2 最小对象 | 八个 16 字节对象同页、互不重叠、对齐，只减少一页 | PASS / PASS |
+| 3 大小分类 | 八种标准大小及 20/100/300 请求，容量分别向上匹配，活动对象期间重复初始化保持状态 | PASS / PASS |
+| 4 数据隔离 | 多缓存对象写不同模式，逐字节回读，完整槽位区间不重叠 | PASS / PASS |
+| 5 释放复用 | 释放一个 64 字节对象、拒绝二次释放、再次申请复用原地址，邻接对象数据完整 | PASS / PASS |
+| 6 跨 Slab | 600 个 16 字节对象，实测容量 248，至少三页，检查 full→partial→full 及释放期间每步状态 | PASS / PASS |
+| 7 边界与耗尽 | 0、SIZE_MAX 附近溢出、超过物理内存的请求；借走真实 PMM 全部剩余页，新 Slab/大对象失败，已有 partial 仍可分配，数据与状态保持 | PASS / PASS |
+| 8 完整回收 | 八缓存同时工作后逆序释放，登记表和统计归零，空闲页恢复 | PASS / PASS |
+| 9 混合压力 | 种子 2411302，64 活动槽，1024 次操作；每步前后检查逐字节数据、地址、对齐、容量区间、对象数、链表位图及实际页数守恒 | PASS / PASS |
+| 10 大对象 | 同时申请 2049、4096、8193、65536 字节，写满请求区并逐字节回读，拒绝内部和重复释放，完整归还实际占用页 | PASS / PASS |
+| 11 非法释放 | NULL、低地址、栈、独立 PMM 页、槽位内部、页头地址；拒绝后活动数据和页数不变，清理恢复 | PASS / PASS |
+
+耗尽测试通过 `alloc_pages()` 实际借页，并保存每次原请求页数，结束时逐块归还；未改写 PMM 私有链表。压力测试的页数条件为 `nr_free_pages()+stats.backing_pages==initial`，能够检查 Buddy 二次幂取整占用。内部一致性检查还覆盖空闲链表重复节点、位图遗漏、状态错误、物理块重叠及缓存计数失配，因此测试包含对实际数据和管理状态的检验。
+
+#### 实验结果
+
+本轮使用 GCC 13.2.0、QEMU 4.1.1、128 MiB RAM。命令和清理顺序由 `tools/validate_slub.py` 保存到日志；相当于依次执行：
+
+```bash
+make clean
+make DEFS=-DSLUB_SELFTEST -j4
+make qemu DEFS=-DSLUB_SELFTEST QEMU="$QEMU_LAB2"
+make clean
+make -j4
+make qemu QEMU="$QEMU_LAB2"
+make grade QEMU="$QEMU_LAB2"
+make clean
+make DEFS="-DUSE_BUDDY -DSLUB_SELFTEST" -j4
+make qemu DEFS="-DUSE_BUDDY -DSLUB_SELFTEST" QEMU="$QEMU_LAB2"
+make clean
+make -j4
+make qemu QEMU="$QEMU_LAB2"
+```
+
+`QEMU_LAB2` 的完整设置见 4.4 节。三个配置均编译成功。默认运行没有 SLUB 自测输出，官方真实评分为 `check page init: OK`、`check best fit: OK`、`Total Score: 20/20`。默认 PMM 上层 SLUB 的十一组测试全部通过，空闲页从 31924 恢复到 31924；Buddy 原有八组自测全部通过，其上层 SLUB 十一组也全部通过，空闲页从 31923 恢复到 31923。两者压力测试均完成 528 次申请和 496 次释放，最后再清理 32 个活动对象。没有将边界场景中的预期分配失败计为测试失败。
+
+这些页数来自不同配置的真实内核镜像，不应与原报告早期 Buddy 的 31928 强行相等。启用测试和不同管理器会改变代码/静态数据体积；本轮验收条件是各自运行前后页数相等。
+
+#### 证据与分析
+
+完整日志见 [SLUB](./evidence/slub-qemu.log)、[Buddy 与 SLUB](./evidence/buddy-slub-qemu.log)、[官方评分](./evidence/grade.log)、[官方串口](./evidence/grade-serial.log)、[默认最终启动](./evidence/default-final-qemu.log)；编译记录及配置汇总位于 [evidence](./evidence/README.md)。用户在本地终端运行后提供的真实 SLUB 截图如下。
+
+![图 5.5：SLUB 十一组自测结果](./images/slub-test-results.png)
+
+图 5.5：真实终端截图。十一组测试全部通过；16 字节缓存单 Slab 容量为 248，真实空闲页数从 31924 恢复到 31924，1024 次压力操作包括 528 次申请和 496 次释放，最后输出 `[SLUB] ALL TESTS PASSED`。
+
+SLUB 实现及自测首轮编译、运行即通过，未出现内核 panic、断言失败或数据破坏，因此没有虚构算法失败记录。本轮实际问题为 QEMU 版本不符、旧版构建参数及本地依赖、GDB 打印优化变量，这些环境和调试问题及真实修正分别保存在开发记录和失败日志。成功标记后脚本主动终止 QEMU，避免内核末尾无限循环持续占用 CPU；日志的 SIGTERM 属于该收尾过程。最终已清理并恢复默认 Best-Fit 构建。
 
 ---
 
@@ -602,10 +769,12 @@ Lab2 三名成员统一在 `lab2` 分支协作。当前已完成任务对应的�
 | 谭锦睿 | `5b5beff` | 实现功能模块一 `page_init()` |
 | 谭锦睿 | `c5c63f4` | 实现 Best-Fit 并切换 `pmm_manager` |
 | 黄奕浩 | `f04ce5a` | 实现并接入 Buddy System，完成八组内核自测 |
-| 王乐之 | 待对应负责人补充 | SLUB Challenge 模块与测试 |
-| 三人共同 | 待对应负责人补充 | GDB 页表查询记录与报告整合 |
+| 王乐之 | `2cba00f` | 实现 SLUB、十一组内核自测及完整回归验证工具 |
+| 三人共同 | `2cba00f` | 新增 guest Sv39 与 host QEMU/MMU/TLB 调试脚本，真实结果见 4.4 节 |
 
 First-Fit 任务属于源码阅读与思考题，没有单独的代码提交，其分析结果记录在本报告 4.2.1 节。
+
+2026-10-24 初始工作目录是缺少 `.git` 的解压副本，先保存修改前基线及差异。用户随后提供真实仓库 `https://github.com/1wuyi2/nku-os.git` 并授权上传，已从 `lab2` 分支克隆到 `/home/wlz/nku-os-lab2/nku-os-git`，确认远程基线 `dc81539` 与本轮开发前源码及报告一致，再迁入本次修改。实际实现提交为 `2cba00f`；报告、两份 Prompt、运行证据和两张用户提供的真实截图随独立文档提交保存。原 PMM、官方评分、Makefile、启动汇编及链接脚本均未修改，未纳入构建产物或其他成员的未提交内容。
 
 ---
 
@@ -621,11 +790,21 @@ First-Fit 按链表顺序选择第一个可满足请求的空闲块，通常能�
 
 ## 7.3 SLUB 与页级分配的关系
 
-待对应负责人完成后补充。
+PMM 管理连续物理页，SLUB 在其上管理对象。申请八个 16 字节对象时，PMM 只提供一个 4096 字节页面，SLUB 在 128 字节页头之后划分 248 个槽位并逐个分配；全部对象释放后，该页立即回到 PMM。这一实际同页测试说明，小对象可以共享物理页，并由位图和空闲链表维持独立生命周期。
+
+大小分类用空间换取简单的对象复用。例如 20 字节请求使用 32 字节槽位，100 字节使用 128 字节，300 字节使用 512 字节；差额形成内部碎片。页头和页尾余量也是空间开销，2048 字节缓存每页仅容纳一个对象，利用率并非对所有大小都最优。缓存尺寸增加能够缩小取整浪费，同时增加管理结构与实现复杂度。本轮没有测量性能，不据此编造加速比例。
+
+partial/full 状态避免对已满 Slab 反复尝试分配，最后一个对象释放时立即归页，便于实验验证完整回收。代价是反复清空和创建缓存时会增加 PMM 调用；当前没有 Linux SLUB 的每 CPU 缓存、构造函数或空 Slab 保留策略。活动块归属检查为线性查找，释放成本随活动 Slab 数增加。大对象仍依赖连续页，无法消除 PMM 外部碎片，Buddy 还会产生二次幂取整开销。
+
+当前实现面向现有单核启动阶段，调用者需要串行访问；尚未提供中断或多核锁。释放防护可拒绝当前未分配槽位和非法地址，但在同一地址被重新分配后，裸指针接口无法区分旧指针与新活动对象。使用者仍需遵守对象生命周期，避免释放后使用。独立页头设计保留了 PMM 全部 `Page` 状态，与默认 Best-Fit 和可选 Buddy 的兼容性已通过真实运行检验。
 
 ## 7.4 Sv39 页表理解
 
-待对应负责人完成后补充。
+本轮从实际 `satp=0x8000000000080205` 取得根页表 `0x80205000`，用 VA 的 VPN[2]=511 读到 `0x200000cf`。根层 PTE 已具备 R/X 权限，属于 1 GiB 叶子，因此物理地址需要合并 VA 的低 30 位：`0x80000000+0x2000d6=0x802000d6`。若仅组合低 12 位，将丢失 VPN[1]/VPN[0]，结果错误；若把该 PTE 当作目录继续读下一级，也会读取错误的物理内容。有效位、W/R 合法性、特权权限和超级页 PPN 对齐需要共同检查。
+
+guest GDB 的虚拟/物理字节比较与 host GDB 中 QEMU 的页表读取、叶子计算结果相符。QEMU walker 返回的是供软件 TLB 使用的 4 KiB 页基址 `0x80200000`，最终字节地址由偏移 `0xd6` 补全。原始页表映射粒度为 1 GiB，而本轮 `tlb_set_page` 的 size 为 4 KiB，说明模拟器可用更细的缓存粒度服务超级页访问。
+
+实际观察到 `entry->addr_code` 命中后跳过 walker，同时在 M 模式、satp=0 时也观察到软件 TLB miss 及地址直通。QEMU 的软件 TLB 还服务宿主 RAM 地址转换和模拟访问属性，与真实 CPU 的硬件 TLB 在实现和使用范围上存在差异。调试时需区分客体 VA、客体 PA、主机指针及软件 TLB 页基址；`get_page_addr_code()` 返回的 `ram_addr_t` 也不能直接作为客体物理地址。完整数值、源码调用链和复现命令见 4.4 节。
 
 ## 7.5 Prompt 设计与开发验证
 
@@ -677,8 +856,17 @@ First-Fit 按链表顺序选择第一个可满足请求的空闲块，通常能�
 
 ### SLUB Challenge
 
-待对应负责人完成后补充。
+- [x] 两份四段式 Prompt，与实际总任务连续开发过程一致
+- [x] 八缓存、页内独立元数据、位图和空闲链表
+- [x] 大对象、边界防护、Slab 状态转换和立即回收
+- [x] Best-Fit/Buddy 上层十一组自测及 1024 次压力操作通过
+- [x] 真实物理页数完全恢复，默认官方评分保持 20/20
+- [x] 报告、原始终端日志和可复现脚本保存
+- [x] 在小组真实 `lab2` 仓库完成正式实现 commit（`2cba00f`）
 
 ## 分支任务：GDB 页表查询
 
-待对应负责人完成后补充。
+- [x] 真实 satp、VPN、PTE、超级页物理地址计算及字节比对
+- [x] 实际 QEMU 源码 walker、M 模式直通、TLB miss/填充/命中观察
+- [x] GDB 命令文件、执行脚本及原始输出保存
+- [x] 用户提供的真实 SLUB 与 Sv39 终端截图已保存并插入对应章节
