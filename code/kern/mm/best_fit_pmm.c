@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 //lab2 function2-2 2412771
-// Framework tests: students must not modify basic_check or best_fit_check.
+// Framework tests: students must not modify basic_check or best_fit_check。
 static free_area_t free_area;
 
 #define free_list (free_area.free_list)
