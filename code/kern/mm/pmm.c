@@ -1,6 +1,5 @@
 #include <default_pmm.h>
 #include <best_fit_pmm.h>
-#include <buddy_pmm.h>
 #include <defs.h>
 #include <error.h>
 #include <memlayout.h>
@@ -9,6 +8,7 @@
 #include <sbi.h>
 #include <stdio.h>
 #include <string.h>
+#include <../sync/sync.h>
 #include <riscv.h>
 #include <dtb.h>
 
@@ -35,11 +35,7 @@ static void check_alloc_page(void);
 
 // init_pmm_manager - initialize a pmm_manager instance
 static void init_pmm_manager(void) {
-#ifdef USE_BUDDY
-    pmm_manager = &buddy_pmm_manager;
-#else
-    pmm_manager = &best_fit_pmm_manager;
-#endif
+    pmm_manager = &default_pmm_manager;
     cprintf("memory management: %s\n", pmm_manager->name);
     pmm_manager->init();
 }
@@ -52,80 +48,40 @@ static void init_memmap(struct Page *base, size_t n) {
 // alloc_pages - call pmm->alloc_pages to allocate a continuous n*PAGESIZE
 // memory
 struct Page *alloc_pages(size_t n) {
-    return pmm_manager->alloc_pages(n);
+    struct Page *page = NULL;
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        page = pmm_manager->alloc_pages(n);
+    }
+    local_intr_restore(intr_flag);
+    return page;
 }
 
 // free_pages - call pmm->free_pages to free a continuous n*PAGESIZE memory
 void free_pages(struct Page *base, size_t n) {
-    pmm_manager->free_pages(base, n);
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        pmm_manager->free_pages(base, n);
+    }
+    local_intr_restore(intr_flag);
 }
 
 // nr_free_pages - call pmm->nr_free_pages to get the size (nr*PAGESIZE)
 // of current free memory
 size_t nr_free_pages(void) {
-    return pmm_manager->nr_free_pages();
+    size_t ret;
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        ret = pmm_manager->nr_free_pages();
+    }
+    local_intr_restore(intr_flag);
+    return ret;
 }
 
-//lab2 function1 2412771
-static void page_init(void) {
-    extern char end[];
-
-    va_pa_offset = PHYSICAL_MEMORY_OFFSET;
-
-    uint64_t mem_base = get_memory_base();
-    uint64_t mem_size = get_memory_size();
-    if (mem_size == 0 || mem_base > (uint64_t)-1 - mem_size) {
-        panic("invalid physical memory range from DTB");
-    }
-
-    uint64_t mem_end = mem_base + mem_size;
-    uintptr_t managed_end = ROUNDDOWN(mem_end, PGSIZE);
-
-    /* The existing Page conversion helpers use the fixed DRAM base as nbase. */
-    if (mem_base != DRAM_BASE || managed_end <= mem_base) {
-        panic("unsupported physical memory range from DTB");
-    }
-
-    npage = PPN(managed_end);
-    size_t nr_pages = npage - nbase;
-    if (nr_pages > (size_t)-1 / sizeof(struct Page)) {
-        panic("physical page descriptor array is too large");
-    }
-
-    uintptr_t kernel_end = (uintptr_t)end;
-    if (kernel_end > (uintptr_t)-1 - (PGSIZE - 1)) {
-        panic("kernel end address overflow");
-    }
-    pages = (struct Page *)ROUNDUP(kernel_end, PGSIZE);
-
-    uintptr_t pages_pa = PADDR(pages);
-    size_t pages_size = nr_pages * sizeof(struct Page);
-    if (pages_pa < mem_base || pages_pa > managed_end ||
-        pages_size > managed_end - pages_pa) {
-        panic("physical memory is too small for page descriptors");
-    }
-
-    memset(pages, 0, pages_size);
-    for (size_t i = 0; i < nr_pages; i ++) {
-        SetPageReserved(&pages[i]);
-    }
-
-    uintptr_t free_start = pages_pa + pages_size;
-    size_t unaligned = free_start % PGSIZE;
-    if (unaligned != 0) {
-        size_t padding = PGSIZE - unaligned;
-        if (padding > managed_end - free_start) {
-            free_start = managed_end;
-        } else {
-            free_start += padding;
-        }
-    }
-
-    if (free_start < managed_end) {
-        init_memmap(pa2page(free_start),
-                    (managed_end - free_start) / PGSIZE);
-    }
-}
+//lab2 请补充你在lab2中的代码
 
 /* pmm_init - initialize the physical memory management */
 void pmm_init(void) {
