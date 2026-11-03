@@ -189,11 +189,77 @@ kern/trap/trap.c
 
 ### 4.1.3 实现过程
 
-[完成后填写]
+本任务在老师已经提供的 `SAVE_ALL` 基础上完成 `RESTORE_ALL` 和 `__alltraps`。
+
+首先分析 `SAVE_ALL` 可以看到，发生 Trap 后程序先将原来的 `sp` 保存到 `sscratch`，随后在当前栈上开辟 `36 * REGBYTES` 的空间保存 TrapFrame。在 RV64 环境下 `REGBYTES = 8`，因此 TrapFrame 共占 288 字节。
+
+其中前 32 个槽位对应 `x0 ~ x31`，第 2 个槽位保存 Trap 前原来的 `sp`，后四个槽位分别保存 `sstatus`、`sepc`、`sbadaddr` 和 `scause`。
+
+`RESTORE_ALL` 按照 `SAVE_ALL` 的布局进行反向恢复。首先从 TrapFrame 中读取 `sstatus` 和 `sepc` 并写回对应 CSR，然后依次恢复通用寄存器。`x0` 不需要恢复，因为 RISC-V 的 `x0` 始终为 0。`sp` 必须最后恢复，因为此前所有寄存器仍需要以当前 `sp` 作为 TrapFrame 的访问基址。
+
+`__alltraps` 中先调用已有的 `SAVE_ALL` 保存现场。此时 `sp` 指向当前 TrapFrame，根据 RISC-V 函数调用约定，将 `sp` 复制到 `a0`，作为 `trap(struct trapframe *tf)` 的第一个参数，然后通过 `jal trap` 进入 C 语言 Trap 处理函数。
+
+`trap()` 返回后程序顺序进入 `__trapret`，执行 `RESTORE_ALL` 恢复现场，最后通过 `sret` 返回 Trap 前的执行流程。
+
+完整过程为：
+
+```text
+发生 Trap
+    ↓
+__alltraps
+    ↓
+SAVE_ALL
+    ↓
+sp 指向 TrapFrame
+    ↓
+a0 = sp
+    ↓
+trap(tf)
+    ↓
+trap_dispatch(tf)
+    ↓
+trap() 返回
+    ↓
+__trapret
+    ↓
+RESTORE_ALL
+    ↓
+sret
+```
 
 ### 4.1.4 关键代码
 
-[完成后填写]
+`RESTORE_ALL` 首先恢复 Trap 返回所需要的 `sstatus` 和 `sepc`：
+
+```asm
+LOAD s1, 32*REGBYTES(sp)
+LOAD s2, 33*REGBYTES(sp)
+csrw sstatus, s1
+csrw sepc, s2
+```
+
+随后按照 TrapFrame 中的保存位置恢复通用寄存器。其中 `sp` 最后恢复：
+
+```asm
+LOAD x1, 1*REGBYTES(sp)
+LOAD x3, 3*REGBYTES(sp)
+...
+LOAD x31, 31*REGBYTES(sp)
+LOAD x2, 2*REGBYTES(sp)
+```
+
+Trap 入口的主要代码为：
+
+```asm
+__alltraps:
+    SAVE_ALL
+
+    #lab3 function1 2412771
+    move a0, sp
+    jal trap
+```
+
+`SAVE_ALL` 完成后，`sp` 就是当前 TrapFrame 的地址，因此直接通过 `a0` 将其传给 `trap()`。
 
 ### 4.1.5 Prompt
 
@@ -208,26 +274,66 @@ report/prompt.md
 ```markdown
 [PROMPT]
 
-[完成后填写]
+读取当前 Lab3 真实工程，在 `kern/trap/trapentry.S` 中完成 `RESTORE_ALL` 和 `__alltraps`，实现 Trap 入口、上下文恢复以及对 `trap()` 的调用。
 
 [RELY]
 
-[完成后填写]
+以当前已有的 `SAVE_ALL`、`struct trapframe`、`trap()`、RISC-V ABI 和 `REGBYTES/LOAD/STORE` 为准。
 
 [GUARANTEE]
 
-[完成后填写]
+只修改 `trapentry.S`，不修改 `SAVE_ALL`、`__trapret`、测试代码以及其他组员负责的中断和异常处理函数。
 
 [SPECIFICATION]
 
-[完成后填写]
+严格按照 TrapFrame 布局恢复 `sstatus`、`sepc` 和通用寄存器，最后恢复 `sp`；`__alltraps` 中将当前 TrapFrame 地址通过 `a0` 传给 `trap()`，返回后进入已有的 Trap 返回流程。
 ```
 
 ### 4.1.6 测试与验证
 
-[完成后填写]
+本任务完成后首先对修改范围进行了检查：
 
----
+```bash
+git diff --check
+git diff --name-only
+```
+
+`git diff --check` 未发现格式问题，`git diff --name-only` 仅显示：
+
+```text
+code/kern/trap/trapentry.S
+```
+
+说明本任务没有修改其他组员负责的代码。
+
+随后单独编译 Trap 入口汇编文件：
+
+```bash
+cd ~/os-lab/nku-os/code
+make obj/kern/trap/trapentry.o V=
+```
+
+目标文件可以正常生成，说明当前 `trapentry.S` 能够通过汇编和编译。
+
+进一步通过反汇编检查生成的指令，确认：
+
+- `a0` 被设置为当前 TrapFrame 地址；
+- 正确生成对 `trap` 的调用；
+- `sstatus` 和 `sepc` 被正确写回；
+- `sp` 最后恢复；
+- 返回流程最终执行 `sret`。
+
+目前执行完整 `make` 时仍会在 `trap.c` 中报：
+
+```text
+implicit declaration of function 'interrupt_handler'
+implicit declaration of function 'exception_handler'
+```
+
+这是因为功能二中的中断处理和异常处理尚未由其他组员完成，与本任务的 `trapentry.S` 编译无关。
+
+因此，目前已经完成了功能一的代码实现、修改范围检查和独立编译验证；完整 QEMU 运行和 Lab3 联调将在功能二代码合入后统一进行。
+
 
 ## 4.2 功能二：中断处理
 
