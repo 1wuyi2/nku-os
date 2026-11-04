@@ -28,8 +28,8 @@
 
 根据实验指导书，本次实验目前需要完成的主要内容如下：
 
-- [ ] 功能一：Trap 入口与上下文恢复 —— 谭锦睿
-- [ ] 功能二：中断处理 —— 黄奕浩
+- [x] 功能一：Trap 入口与上下文恢复 —— 谭锦睿
+- [x] 功能二：中断处理 —— 黄奕浩（独立副本验证通过，待整体联调）
 - [ ] 功能二：异常处理 —— 王乐之
 - [ ] 完成实验代码整合
 - [ ] 完成编译与运行验证
@@ -87,7 +87,7 @@
 |---|---|---|
 | 2412771-谭锦睿 | ChatGPT / Codex | 实验要求分析、代码理解、实现与检查辅助 |
 | 2413581-黄奕浩 | ChatGPT / Codex | 中断处理实现与检查 |
-| 2411302-王乐之 | ChatGPT / Codex| 异常处理实现与检查 |
+| 2411302-王乐之 | ChatGPT / Codex | 异常处理实现与检查 |
 
 实际使用的 Prompt 统一整理在：
 
@@ -323,14 +323,13 @@ make obj/kern/trap/trapentry.o V=
 - `sp` 最后恢复；
 - 返回流程最终执行 `sret`。
 
-目前执行完整 `make` 时仍会在 `trap.c` 中报：
+功能一独立验证当时，完整 `make` 在 `trap.c` 中报：
 
 ```text
 implicit declaration of function 'interrupt_handler'
 implicit declaration of function 'exception_handler'
 ```
 
-这是因为功能二中的中断处理和异常处理尚未由其他组员完成，与本任务的 `trapentry.S` 编译无关。
 
 因此，目前已经完成了功能一的代码实现、修改范围检查和独立编译验证；完整 QEMU 运行和 Lab3 联调将在功能二代码合入后统一进行。
 
@@ -339,72 +338,121 @@ implicit declaration of function 'exception_handler'
 
 **负责人：2413581-黄奕浩**
 
-### 4.2.1 任务要求
+### 4.2.1 任务要求与规格
 
-本任务主要涉及：
+实现 `kern/trap/trap.c` 中的 `void interrupt_handler(struct trapframe *tf)`。输入是汇编入口保存的 TrapFrame；处理完成后交回统一恢复流程。中断处理不跳过指令，不修改 `tf->epc`、寄存器现场或其他组员的异常处理逻辑。
 
-```text
-kern/trap/trap.c
-```
+时钟中断必须重新设置下一次事件，每次仅增加一次 `ticks`，每累计 `TICK_NUM` 次打印统计，累计打印达到 `SHUTDOWN_AFTER` 后调用 SBI 关机。其他已知中断按类型提示；未知原因输出原因号及完整 TrapFrame。中断原因比较前应去掉 RV64 `scause` 的最高中断标志位。
 
-需要完成：
+### 4.2.2 主要涉及文件和调用关系
 
-```c
-interrupt_handler(struct trapframe *tf)
-```
+修改文件为 `kern/trap/trap.c`，依赖 `trap.h` 的现场布局、`libs/riscv.h` 的 IRQ 编码、`kern/driver/clock.c` 的 `ticks` 与 `clock_set_next_event()`、`libs/sbi.h` 的 `sbi_shutdown()`。保留 `trapentry.S`、`SAVE_ALL`、`RESTORE_ALL` 和框架测试。
 
-根据 Trap 原因处理对应的中断。
-
-其中包括实验中使用到的时钟中断以及其他中断情况。
-
-### 4.2.2 主要涉及文件
-
-```text
-kern/trap/trap.c
-kern/trap/trap.h
-kern/driver/clock.c
-kern/driver/clock.h
-```
+调用链为 `__alltraps → SAVE_ALL → trap(tf) → trap_dispatch(tf) → interrupt_handler(tf) → __trapret → RESTORE_ALL → sret`。`trap_dispatch()` 已通过原因最高位区分中断与异常；本函数清除该位后用 `switch` 区分中断编号。
 
 ### 4.2.3 实现过程
 
-[完成后填写]
+处理 `IRQ_S_TIMER` 时首先调用 `clock_set_next_event()`，再执行 `ticks++`。定时器接口设置的是一次性未来事件，不重新设置就无法持续收到后续时钟中断。`clock.c` 使用 `rdtime` 读取时间计数，在当前 QEMU 的时间基准下，100000 个计数约为 10 ms。
+
+沿用框架的 `TICK_NUM=100`，新增 `SHUTDOWN_AFTER=10`。前者是每次打印对应的中断数量，后者是打印次数上限，因此累计1000次中断、打印十行后关机。10是本组在当前实现中选择的参数；它允许框架的200次中断检查先完成。
+
+其他分支覆盖 U/S/M 软件中断、U/M 定时器中断和 U/S/M 外部中断，输出对应提示。未识别原因打印 `Unknown interrupt: cause ...` 并调用 `print_trapframe(tf)`。
 
 ### 4.2.4 关键代码
 
-[完成后填写]
-
-### 4.2.5 Prompt
-
-完整 Prompt 见：
-
-```text
-report/prompt.md
+```c
+#define TICK_NUM 100
+#define SHUTDOWN_AFTER 10
 ```
 
-报告中使用的精简 Prompt：
-
-```markdown
-[PROMPT]
-
-[完成后填写]
-
-[RELY]
-
-[完成后填写]
-
-[GUARANTEE]
-
-[完成后填写]
-
-[SPECIFICATION]
-
-[完成后填写]
+```c
+uintptr_t cause = tf->cause & ~((uintptr_t)1 << 63);
 ```
+
+```c
+case IRQ_S_TIMER:
+    clock_set_next_event();
+    ticks++;
+    if (ticks % TICK_NUM == 0) {
+        print_ticks();
+        if (ticks / TICK_NUM >= SHUTDOWN_AFTER) {
+            sbi_shutdown();
+        }
+    }
+    break;
+```
+
+```c
+default:
+    cprintf("Unknown interrupt: cause %lu\n", (unsigned long)cause);
+    print_trapframe(tf);
+    break;
+```
+
+
+### 4.2.5 Prompt 与 spec 的设计
+
+本任务采用连续对话逐步明确和验证需求，提示词整理到 `prompt.md` 的相关部分，包含任务、负责人、仓库与文件范围，以及 `[PROMPT]`、`[RELY]`、`[GUARANTEE]`、`[SPECIFICATION]` 四段。内容依次说明实现目标、已有接口、成员分工边界、处理规则和验证命令。
+
+spec 先定义输入、允许的修改范围和不变量，再约定每种中断的行为、打印与关机边界、失败兜底和验证标准。Prompt 提供实际源码与接口作为依赖，要求保留异常处理与汇编入口，并且只在独立副本中补充测试支撑。
 
 ### 4.2.6 测试与验证
 
-[完成后填写]
+```bash
+make obj/kern/trap/trap.o
+```
+
+本文件单独编译成功。
+
+为验证本人模块，在仓库之外的独立副本加入遇到异常立即 panic 的临时异常处理支撑，以及非时钟分支的构造现场测试。其作用是让真实时钟路径可以链接运行。
+
+| 验证内容 | 方法与判断 | 实际结果 |
+|---|---|---|
+| 非时钟分支 | 构造原因0、1、3、4、7、8、9、11、15，调用处理函数；检查相应输出、`ticks`仍为0、`epc`不变 | PASS |
+| 未知中断 | 原因15打印原因号与完整TrapFrame | PASS |
+| 持续真实时钟与返回 | 启动真实QEMU，反复进入和退出Trap；统计独立的`100 ticks`输出行 | 恰好10行 |
+| 自动关机 | 不使用超时终止作为成功条件，等待SBI关机导致QEMU自行退出 | 退出码0 |
+| 框架时钟用例 | 在同一独立副本中用原`tools/inject.py`注入原测试，编译`DEFS=-DGRADE_LAB3_TIMER` | `PASS (40/40, ticks=200)` |
+
+框架时钟测试输出发生在第二行`100 ticks`后；其等待循环仍允许时钟中断继续触发，因此该次运行最终同样打印十行并自动关机。
+
+真实输出摘要：
+
+```text
+[isolated] non-timer cases PASS
+++ setup timer interrupts
+100 ticks
+100 ticks
+[Test 3] Sustained supervisor timer: PASS (40/40, ticks=200)
+```
+
+此后还输出八行`100 ticks`，QEMU自行退出；自动校验确认总行数为10、退出码为0。
+
+### 4.2.7 截图与复现
+
+以下两张图片由我实际运行终端后截取，保留原始截图内容。
+
+![图1：中断模块——持续时钟与自动关机（独立测试副本）](./images/huangyihao-timer-shutdown.png)
+
+图1：终端显示时钟初始化完成，累计200次中断时，框架时钟用例输出 `PASS (40/40, ticks=200)`。画面共有十行 `100 ticks`，之后QEMU退出并返回shell，执行 `echo $?` 得到0。结合代码中的 `SHUTDOWN_AFTER=10`，验证持续重设事件、每百次打印和达到阈值后自动关机。
+
+![图2：中断模块——非时钟分类与未知中断兜底（独立测试副本）](./images/huangyihao-interrupt-fallback.png)
+
+图2：画面展示S态和M态外部中断提示，以及 `Unknown interrupt: cause 15` 后的完整TrapFrame。构造的现场中 `epc=0x12345678`，`cause=0x0000000f`，末尾输出 `[isolated] non-timer cases PASS`。测试断言检查非时钟分支不改变 `ticks` 与 `epc`。
+
+在WSL进入该目录，运行已注入的时钟配置：
+
+```bash
+cd './work/lab3-interrupt-check-47ccmamf'
+make qemu DEFS=-DGRADE_LAB3_TIMER QEMU=/mnt/d/Tools/qemu-4.1.1/bin/qemu-system-riscv64
+echo $?
+```
+
+若要从头重建本机验证副本，可在PowerShell执行：
+
+```powershell
+python '.\work\verify_lab3_interrupt.py'
+```
 
 ---
 
@@ -499,7 +547,7 @@ report/prompt.md
 
 ## 5.5 时钟中断
 
-[实验过程中结合代码理解后填写]
+时钟初始化开启` sie.STIE`、设置第一次事件并清零`ticks`，之后由`intr_enable()`开启S态全局中断。硬件交给Trap入口，分发到`interrupt_handler()`后重新设置下一事件并计数，最后恢复现场返回原执行位置。时钟中断不应像某些同步异常那样增加`epc`。本实现每100次打印一次，十次打印后关机；时间源是`rdtime`而不是CPU指令周期。`volatile`保证对`ticks`的访问不被不适当地缓存或消除，但不提供多核同步。当前实验在单核启动场景下验证，没有实现调度器或通用外部设备驱动。
 
 ---
 
@@ -551,6 +599,10 @@ make qemu
 ---
 
 # 七、实验过程中遇到的问题
+
+## 黄奕浩：中断处理实现与独立验证
+
+网页引用`SHUTDOWN_AFTER`，框架却只有`TICK_NUM=100`。补充阈值10并明确其单位为打印次数，避免误写成十次时钟中断就关机。原工程的异常处理尚未完成，直接链接不能形成完整内核；通过仓库外的临时异常panic支撑验证真实时钟路径，原工程仅声明异常函数，未代替同学完成。WSL Git与Windows Git对CRLF处理不同会产生整文件差异和尾随空白误报；本次使用换行兼容配置核对实际差异，没有为消除误报而批量重写其他文件。
 
 
 
