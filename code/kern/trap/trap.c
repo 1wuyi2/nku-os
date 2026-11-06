@@ -128,8 +128,24 @@ void interrupt_handler(struct trapframe *tf) {
     }
 }
 
-//lab3 function2 exception_handler YOUR CODE
-void exception_handler(struct trapframe *tf);
+//lab3 function2 exception_handler 2411302
+void exception_handler(struct trapframe *tf) {
+    switch (tf->cause) {
+    case CAUSE_ILLEGAL_INSTRUCTION:
+        cprintf("Illegal instruction at 0x%016lx\n", (unsigned long)tf->epc);
+        break;
+    case CAUSE_BREAKPOINT:
+        cprintf("Breakpoint at 0x%016lx\n", (unsigned long)tf->epc);
+        break;
+    default:
+        print_trapframe(tf);
+        return;
+    }
+
+    /* Read one aligned halfword; a 32-bit instruction may start at EPC % 4 == 2. */
+    uint16_t instruction = *(const volatile uint16_t *)tf->epc;
+    tf->epc += (instruction & 0x3) == 0x3 ? 4 : 2;
+}
 
 static inline void trap_dispatch(struct trapframe *tf) {
     if ((intptr_t)tf->cause < 0) {

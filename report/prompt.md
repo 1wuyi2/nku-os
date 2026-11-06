@@ -178,3 +178,26 @@ make obj/kern/trap/trap.o V=
 进一步在仓库外的独立副本验证：构造非时钟中断现场，检查分类输出、未知原因兜底、`ticks` 和 `epc` 保持不变；在真实 QEMU 中检查持续时钟、十行 `100 ticks` 和自动关机；使用原注入器和 `GRADE_LAB3_TIMER` 运行框架时钟用例，检查200次中断验证通过。副本可以增加遇到异常立即 panic 的测试支撑，但不得将临时支撑或测试修改回填正式工程，也不得把时钟用例通过写成完整实验评分通过。
 
 最后说明实际修改内容、中断原因的识别方式，以及 `时钟事件 → Trap 入口 → trap_dispatch() → interrupt_handler() → 重设事件并计数 → 恢复现场返回` 的执行流程。同步补充本人报告和真实截图方法，未实际运行或截图的内容不得提前写成已完成。
+
+---
+
+任务：Lab3 功能二——异常处理
+负责人：王乐之 2411302
+
+[PROMPT]
+
+在 lab3 分支补齐 `code/kern/trap/trap.c` 中的 `exception_handler(struct trapframe *tf)`，将声明替换为实现，保留原 lab3 注释并将 YOUR CODE 改成 2411302。实际完成编译、测试、本人报告和 GitHub 提交。
+
+[RELY]
+
+先阅读 trap.c、trap.h、trapentry.S、libs/riscv.h、tools/grade.sh、tools/test_lab3.c。使用现有 struct trapframe、tf->cause、tf->epc、CAUSE_ILLEGAL_INSTRUCTION、CAUSE_BREAKPOINT、print_trapframe(tf)、cprintf()；结合保存现场、恢复 sepc 与 sret 的流程实现。
+
+[GUARANTEE]
+
+只修改本人函数及必要局部代码，不修改 interrupt_handler、trap_dispatch、trap、TrapFrame 定义、汇编入口、其他成员学号、官方测试、评分脚本、Makefile 或启动逻辑。不添加空函数或硬编码 PASS。使用 C99 和现有依赖，保留其他成员报告和 Prompt。只暂存 trap.c、report/report.md、report/prompt.md，以“完成异常处理函数”为消息提交，正常推送 lab3，禁止强制推送或覆盖组员工作。保持既有目录结构，不提交临时代码、输出和构建产物。
+
+[SPECIFICATION]
+
+原因 2 输出包含 Illegal instruction at 的原始 EPC，原因 3 输出包含 Breakpoint at 的原始 EPC。仅在这两个分支读取首个 16 位半字，低两位为 11 时 EPC 加 4，否则加 2，兼容四字节边界偏移 2 的普通指令。其他原因调用 print_trapframe(tf)，不读取异常指令，不修改 EPC 或其他现场。
+
+执行 make clean、make、make grade，实际验证入口与断点 35 分、非法指令 25 分、持续时钟 40 分。另在仓库外副本测试真实 c.ebreak、ebreak、16/32 位非法指令及半字对齐，构造未知异常逐字节检查现场不变。完成 4.3.3～4.3.6 和公共测试结论，简版 Prompt 写入报告、完整版追加本文件。测试、Bug 和截图均应如实记录，禁止虚构。完成后检查 git status、git diff --check、git diff --stat 与实际差异，再提交并推送。

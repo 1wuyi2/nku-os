@@ -6,7 +6,7 @@
 |---|---|
 | **实验名称** | Lab3：中断与异常处理 |
 | **小组成员** | 2412771-谭锦睿、2413581-黄奕浩、2411302-王乐之 |
-| **完成日期** | 2026-10-xx |
+| **完成日期** | 2026-11-06 |
 | **实验分支** | `lab3` |
 | **代码目录** | `code/` |
 | **报告目录** | `report/` |
@@ -29,12 +29,12 @@
 根据实验指导书，本次实验目前需要完成的主要内容如下：
 
 - [x] 功能一：Trap 入口与上下文恢复 —— 谭锦睿
-- [x] 功能二：中断处理 —— 黄奕浩（独立副本验证通过，待整体联调）
-- [ ] 功能二：异常处理 —— 王乐之
-- [ ] 完成实验代码整合
-- [ ] 完成编译与运行验证
-- [ ] 完成实验报告
-- [ ] 整理实际使用的 Prompt
+- [x] 功能二：中断处理 —— 黄奕浩（本轮整体联调通过）
+- [x] 功能二：异常处理 —— 王乐之
+- [x] 完成实验代码整合
+- [x] 完成编译与运行验证
+- [x] 完成实验报告
+- [x] 整理实际使用的 Prompt
 
 ### 报告分工
 
@@ -487,63 +487,88 @@ kern/trap/trap.h
 
 ### 4.3.3 实现过程
 
-[完成后填写]
+`exception_handler()` 接收汇编入口保存的 TrapFrame。`trap_dispatch()` 根据原因最高位区分中断与异常，再由本函数按 `tf->cause` 分类：原因 2 为非法指令，原因 3 为断点，分别输出 `Illegal instruction at`、`Breakpoint at` 及原始 EPC。其他原因调用 `print_trapframe(tf)` 后直接返回，保持 EPC 和其余现场不变。
+
+EPC 指向触发同步异常的指令。处理完非法指令和断点后，需要跳过该指令，否则恢复后会再次陷入。通过 `const volatile uint16_t *` 读取 EPC 处首个半字，低两位为 `11` 时增加 4，否则增加 2，分别对应本实验的普通指令和压缩指令。半字读取支持四字节边界偏移 2 的普通指令，避免用未按四字节对齐的指针读取。取指只发生在两类已知异常中，未知异常不会读取可能无效的 EPC。
+
+本实现针对实验现有可读内核代码映射和 16/32 位指令，没有扩展更长指令或通用访存故障恢复。保留 `lab3 function2 exception_handler` 标记，学号填写 `2411302`。
+
+执行关系为 `__alltraps → SAVE_ALL → trap → trap_dispatch → exception_handler → RESTORE_ALL → sret`。函数更新栈中 TrapFrame 的 EPC，恢复代码据此写回 sepc，sret 从新地址继续执行。已有上下文恢复、中断处理及分发逻辑均保持不变。
 
 ### 4.3.4 关键代码
 
-[完成后填写]
+```c
+//lab3 function2 exception_handler 2411302
+void exception_handler(struct trapframe *tf) {
+    switch (tf->cause) {
+    case CAUSE_ILLEGAL_INSTRUCTION:
+        cprintf("Illegal instruction at 0x%016lx\n", (unsigned long)tf->epc);
+        break;
+    case CAUSE_BREAKPOINT:
+        cprintf("Breakpoint at 0x%016lx\n", (unsigned long)tf->epc);
+        break;
+    default:
+        print_trapframe(tf);
+        return;
+    }
+
+    /* Read one aligned halfword; a 32-bit instruction may start at EPC % 4 == 2. */
+    uint16_t instruction = *(const volatile uint16_t *)tf->epc;
+    tf->epc += (instruction & 0x3) == 0x3 ? 4 : 2;
+}
+```
 
 ### 4.3.5 Prompt
 
-完整 Prompt 见：
+完整 Prompt 已追加到 [prompt.md](./prompt.md) 的异常处理部分。以下为精简规格：
 
 ```text
-report/prompt.md
-```
-
-报告中使用的精简 Prompt：
-
-```markdown
 [PROMPT]
-
-[完成后填写]
-
+实现 exception_handler(struct trapframe *tf)，保留 lab3 标记并填写 2411302。
 [RELY]
-
-[完成后填写]
-
+使用现有 TrapFrame、异常原因宏、cprintf()、print_trapframe() 和汇编保存恢复流程。
 [GUARANTEE]
-
-[完成后填写]
-
+只修改本人函数，不修改中断、分发、汇编入口、结构定义、测试或 Makefile。
 [SPECIFICATION]
-
-[完成后填写]
+原因 2、3 打印对应提示及原 EPC；读取首半字判断长度，EPC 增加 2 或 4。其他原因仅打印现场。实际编译、评分，并在独立副本补测压缩指令和半字对齐。
 ```
 
 ### 4.3.6 测试与验证
 
-[完成后填写]
+2026-11-06 在 WSL2 Ubuntu、RISC-V GCC 13.2.0、QEMU 4.1.1 中完成验证。执行 `make clean`、`make -j4` 编译成功；原始 `make grade` 三项分别得到 35/35、25/25、40/40，总分 100/100。命令和公共结果见第六节。
 
----
+官方测试覆盖寄存器现场恢复、断点返回、32 位非法指令返回、原因 20 的完整现场输出及 200 次持续时钟中断。另在仓库外的独立副本增加如下测试，未将临时代码写回正式工程：
+
+| 补充内容 | 实际检查 | 结果 |
+|---|---|---|
+| 16 位断点 | 执行 `.2byte 0x9002`，真实 Trap 返回后继续执行 | PASS |
+| 32 位断点 | 在地址模 4 等于 2 处执行 `.4byte 0x00100073` | PASS |
+| 16 位非法指令 | 执行 `.2byte 0x0000` 后跳过两字节 | PASS |
+| 32 位非法指令 | 在地址模 4 等于 2 处执行 `.4byte 0x0000007b` 后跳过四字节 | PASS |
+| 未知异常 | 构造 cause=20、epc=1，返回后逐字节比较整个 TrapFrame | 完全不变 |
+| 中断兼容 | 异常测试后继续真实时钟，等待正常关机 | 十行 `100 ticks`，退出码 0 |
+
+独立副本两次断点的实际地址为 `0xffffffffc020006c`、`0xffffffffc020006e`，两次非法指令为 `0xffffffffc0200072`、`0xffffffffc0200076`。它们属于本轮测试镜像，重新编译时地址可能变化。
+
+本人的异常函数首次编译与测试即通过，没有遇到算法失败。运行评分时发现脚本直接从 PATH 调用 QEMU，通过仓库外启动器选定课程版本与固件，未改评分脚本。没有新增或虚构截图，临时代码、输出和构建产物未纳入提交。
 
 # 五、关键知识理解
 
 ## 5.1 Trap、Interrupt 与 Exception
 
-[实验过程中结合代码理解后填写]
+Trap 包括异步中断和同步异常。时钟中断由定时器事件触发，处理后继续原执行位置；非法指令和断点由当前指令触发。RV64 scause 的最高位指示中断，低位指示原因，trap_dispatch() 据此分发。
 
 ## 5.2 TrapFrame
 
-[实验过程中结合代码理解后填写]
+TrapFrame 对应栈上的保存现场，包含 32 个通用寄存器槽及 status、epc、badvaddr、cause，RV64 下共 288 字节。C 结构与汇编偏移一致，异常函数更新其中的 epc，其余现场交由统一恢复流程。
 
 ## 5.3 与 Trap 有关的 CSR
 
-[实验过程中结合代码理解后填写]
+stvec 指向入口，scause 保存原因，sepc 保存返回位置，sstatus 保存特权级和中断状态，stval（代码中的旧名为 sbadaddr）保存相关异常信息。sscratch 暂存原栈指针。SAVE_ALL 保存现场，RESTORE_ALL 将 status、epc 写回 CSR。
 
 ## 5.4 Trap 入口和返回过程
 
-[实验过程中结合代码理解后填写]
+硬件保存 Trap 状态并跳到 stvec；入口保存寄存器、建立 TrapFrame，通过 a0 传给 C 函数。处理完成后恢复 status、epc 和通用寄存器，最后恢复 sp 并执行 sret。时钟中断保持 EPC；本实验的非法指令、断点按实际长度推进 EPC。
 
 ## 5.5 时钟中断
 
@@ -555,48 +580,49 @@ report/prompt.md
 
 ## 6.1 编译验证
 
-执行：
+在 `lab3` 仓库的 `code` 目录执行：
 
 ```bash
 make clean
-make
+make -j4
 ```
 
-实际结果：
-
-```text
-[完成后填写]
-```
+编译与链接成功，生成 `bin/kernel`、`bin/ucore.img`，没有编译错误。本轮仅修改异常函数和本人报告、Prompt。
 
 ## 6.2 QEMU 运行验证
 
-执行：
+使用 6.3 节的课程 QEMU 启动器执行：
 
 ```bash
-make qemu
+make qemu QEMU=/home/wlz/.cache/lab3-work/bin/qemu-system-riscv64
 ```
 
-实际结果：
-
-```text
-[完成后填写]
-```
+默认内核完成初始化，连续打印十行 `100 ticks` 后通过 SBI 正常关机，退出码 0。默认启动没有主动触发断点或非法指令；相应功能由官方测试和 4.3.6 节的独立副本验证。
 
 ## 6.3 实验测试
 
-执行命令：
+原评分脚本直接从 PATH 调用 `qemu-system-riscv64`，不使用 Makefile 的 QEMU 覆盖值。本机通过仓库外启动器固定使用 QEMU 4.1.1 与对应固件：
 
 ```bash
-[完成后填写]
+mkdir -p "$HOME/.cache/lab3-work/bin"
+cat > "$HOME/.cache/lab3-work/bin/qemu-system-riscv64" <<'SH'
+#!/bin/sh
+exec /home/wlz/.local/opt/qemu-4.1.1/bin/qemu-system-riscv64 -L /home/wlz/.local/opt/qemu-4.1.1/share/qemu "$@"
+SH
+chmod +x "$HOME/.cache/lab3-work/bin/qemu-system-riscv64"
+PATH="$HOME/.cache/lab3-work/bin:$PATH" make grade
 ```
 
-实际结果：
+评分脚本、注入器和官方用例均未修改，实际结果为：
 
 ```text
-[完成后填写]
+trap entry, register restore, and breakpoint EPC: PASS (35/35)
+illegal instruction EPC advance and return: PASS (25/25)
+re-armed supervisor timer and repeated trap return: PASS (40/40)
+Total Score: 100/100
 ```
 
----
+4.1、4.2 节保留两位组员当时的独立验证记录。本轮补齐异常函数后，正式整体联调覆盖现场恢复、断点和非法指令返回、未知异常打印及持续时钟。
 
 # 七、实验过程中遇到的问题
 
@@ -608,10 +634,8 @@ make qemu
 
 # 八、实验结果
 
-[全部功能完成并实际验证后填写]
-
----
+三位成员的 Trap 入口、中断和异常处理已整合。正式编译通过，官方总分 100/100，默认内核运行十次百中断统计后正常关机。独立副本补测了 16/32 位异常指令、半字对齐和未知异常现场保持。交付仍为 code/、report/，提示词统一放在 report/prompt.md。
 
 # 九、实验总结
 
-[实验完成后填写]
+本实验将硬件 Trap 状态、汇编现场保存与 C 函数分发连接起来。异常处理根据原因选择处理策略，通过 TrapFrame 的 EPC 控制返回位置。兼容压缩指令和半字对齐，能够避免固定跳过四字节导致的错误；时钟中断则保持 EPC 并重设下一事件。实际评分及补充边界验证说明本人的实现能够与其他成员模块共同运行。
