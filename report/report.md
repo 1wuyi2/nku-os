@@ -36,7 +36,7 @@
 
 - [x] 恢复 Lab2 / Lab3 前置依赖
 - [x] Function 1：完成 `page_insert()` / `page_remove()`
-- [ ] Function 2：待对应成员完成
+- [x] Function 2：完成六个创建函数
 - [ ] Function 3：待对应成员完成
 - [ ] 三人代码整合
 - [ ] 完整编译
@@ -631,120 +631,144 @@ test_lab4_pmm_basic()
 
 **负责人：2413581-黄奕浩**
 
-> 本节由负责人根据本人实际代码实现补充。
-
 ## 6.1 任务要求
 
-TODO：根据实验指导书和本人实际负责范围填写。
-
-建议说明：
-
-```text
-Function 2 需要实现什么功能
-为什么需要这些功能
-主要涉及哪些函数
-```
-
----
+按照[指导书功能模块二](http://oslab.mobisys.top/lab2026/_book/lab4/lab4_2_1_exercises.html)，实现 `alloc_proc()`、`proc_init()`、`kernel_thread()`、`do_fork()`、`copy_thread()` 和 `copy_mm()`，使内核建立 PID 为 0 的 idleproc 与 PID 为 1 的 initproc，并能够继续创建、登记可运行的内核线程。本模块准备首次运行所需的数据；实际调度、切换和执行属于 Function 3。
 
 ## 6.2 主要涉及文件
 
-TODO：根据实际修改文件填写。
+| 文件 | 本人修改内容 |
+|---|---|
+| `code/kern/process/proc.c` | 在原 Function 2 注释下补全上述六个函数 |
+| `code/tools/test_function2.py` | 新增独立副本的构建、QEMU 运行与结果检查脚本 |
+| `code/tools/test_function2.inc` | 新增创建功能与失败回滚测试，仅在副本中使用 |
+| `report/prompt.md` | 记录本人实现与验证要求 |
 
-例如：
-
-```text
-code/kern/process/proc.c
-code/kern/process/proc.h
-```
-
-最终以本人实际修改为准。
-
----
+没有修改 Function 1、Function 3、公共结构体或原有评分测试。
 
 ## 6.3 实现过程
 
-TODO：根据实际代码填写。
+`alloc_proc()` 使用 `kmalloc()` 申请 PCB，先整体清零，再设置 `state = PROC_UNINIT`、`pid = -1`、`pgdir = boot_pgdir_pa`，并初始化两个链表节点。清零保证运行次数、调度标志、父进程、mm、trapframe、context、flags 和名称没有未定义初值。页表字段保存的是物理地址，不是 `boot_pgdir_va` 或带 MODE 的 satp 完整值。
 
-建议按照实际调用顺序分析：
+`proc_init()` 初始化全局进程链表和 PID 哈希桶。idleproc 直接复用启动阶段已经使用的 `bootstack`，设置 PID 0、RUNNABLE、need_resched 为真以及名称 idle，再令 `current = idleproc`。它不通过 fork 创建，也不加入普通进程链表和 PID 哈希表；`nr_process` 仍包含 idleproc。随后调用 `kernel_thread(init_main, "Hello world!!", 0)`，从哈希表找到返回 PID 对应的 initproc，确认 PID 为 1，并命名为 init。
 
-```text
-入口函数
-    ↓
-关键步骤 1
-    ↓
-关键步骤 2
-    ↓
-关键步骤 3
-    ↓
-最终结果
-```
+`kernel_thread()` 构造临时 trapframe，将线程函数放入 s0、参数放入 s1，将 epc 指向 `kernel_thread_entry`。status 在当前 sstatus 基础上设置 SPP、SPIE 并清除 SIE：SPP 使 sret 返回 S 态，SPIE 使返回后的 SIE 恢复为开，保存帧中的 SIE 则保持关闭。随后通过 `do_fork(clone_flags | CLONE_VM, 0, &tf)` 创建线程。
 
-不要只复制代码，需要说明每一步为什么这样实现。
+`do_fork()` 先检查进程数上限与必要参数，再依次申请 PCB、设置父进程、申请两页内核栈、调用 `copy_mm()`、调用 `copy_thread()`。准备成功后，在保存并关闭中断的临界区内分配唯一 PID、加入 PID 哈希表和进程链表、增加计数、调用 `wakeup_proc()`，最后恢复进入临界区前的中断状态并返回子线程 PID。准备未完成的 PCB 不会提前对调度器可见。
 
----
+`copy_mm()` 在当前内核线程场景下保留 `proc->mm = NULL`。如果父线程出现非空 mm，返回 `-E_INVAL`，明确拒绝尚未实现的用户地址空间复制。它不改变父进程的 mm，也不增加不存在的地址空间引用计数。
+
+`copy_thread()` 把临时 trapframe 按值复制到新内核栈顶部，设置子线程 a0 为 0；传入栈地址非零时使用指定地址，否则把恢复后的 sp 指向栈上的 trapframe 起始位置。context.ra 指向 `forkret`，context.sp 指向这个 trapframe。临时变量 tf 在函数返回后失效，不影响新线程独立保存的副本。
+
+如果 PCB 分配失败，返回 `-E_NO_MEM`；内核栈申请失败，释放 PCB；`copy_mm()` 失败，先释放内核栈再释放 PCB；达到 `MAX_PROCESS` 时返回 `-E_NO_FREE_PROC`。失败路径不分配 PID、不加入链表或哈希表，也不增加进程计数。
 
 ## 6.4 关键代码
 
-TODO：粘贴本人真正修改或补充的核心代码。
+以下节选来自本人实际实现，完整代码见 `code/kern/process/proc.c`：
 
 ```c
-// TODO
+proc->tf = (struct trapframe *)(proc->kstack + KSTACKSIZE) - 1;
+*proc->tf = *tf;
+proc->tf->gpr.a0 = 0;
+proc->tf->gpr.sp = esp != 0 ? esp : (uintptr_t)proc->tf;
+proc->context.ra = (uintptr_t)forkret;
+proc->context.sp = (uintptr_t)proc->tf;
 ```
 
----
+```c
+local_intr_save(intr_flag);
+proc->pid = get_pid();
+hash_proc(proc);
+list_add(&proc_list, &proc->list_link);
+nr_process++;
+wakeup_proc(proc);
+local_intr_restore(intr_flag);
+return proc->pid;
+```
 
 ## 6.5 关键数据结构分析
 
-TODO：根据实际 Function 2 使用的数据结构填写。
+`proc_struct` 是管理对象，包含 PID、状态、父进程、内核栈、页表物理地址和两个链表节点；`context` 保存上下文切换所需的 ra、sp 与 s0～s11，由 Function 3 的 `switch_to()` 使用；`trapframe` 保存完整通用寄存器与 status、epc、badvaddr、cause，由 `forkrets()`、`__trapret` 和 `RESTORE_ALL` 使用。两种现场承担不同工作，不能只设置其中一种。
 
-重点分析实际使用到的字段，不需要把整个结构体全部抄一遍。
-
----
+每个普通内核线程拥有独立的两页内核栈，但共享内核页表，`mm == NULL`。trapframe 放在内核栈高地址端，首次恢复后 sp 位于该帧起始位置；后续函数调用向低地址使用栈。创建测试验证了帧地址与布局，还没有验证实际切换后的指令执行。
 
 ## 6.6 Function 2 调用关系
 
-TODO：结合实际代码整理。
-
 ```text
-TODO
+kern_init -> proc_init
+               |-> alloc_proc -> 设置 idleproc/current
+               |-> kernel_thread -> 构造临时 trapframe
+                                      |-> do_fork
+                                            |-> alloc_proc
+                                            |-> setup_kstack
+                                            |-> copy_mm
+                                            |-> copy_thread
+                                            |-> get_pid/hash_proc/list_add
+                                            |-> wakeup_proc
+               |-> find_proc -> 设置 initproc
+
+Function 3 完成后预计的首次运行路径（当前未执行验证）：
+schedule -> proc_run -> switch_to -> forkret -> forkrets
+         -> __trapret -> RESTORE_ALL -> sret -> kernel_thread_entry
+         -> s0 指定的函数(s1 指定的参数) -> do_exit
 ```
 
----
+`do_exit()` 目前仍是框架中的 panic 占位，不属于此次创建功能实现，不能据此声称已经实现正常退出和回收。
 
 ## 6.7 实现中遇到的问题
 
-TODO：根据本人真实开发过程填写。
+Function 3 尚未实现，原工程 `make -j2` 实际编译到最终链接后报 `undefined reference to cpu_idle`，因此不能直接运行完整内核或把 `make grade` 记为通过。
 
-如果没有明显问题，可以删除本节。
-
----
+为验证自己的创建实现，新增脚本复制工程到 D 盘同级独立目录，在副本中以测试入口替代尚不存在的 `cpu_idle()`。测试入口只检查创建状态并关机，不调用调度器、不运行新线程。副本中的两个分配调用还被包装以注入 PCB/内核栈分配失败，正常情况下仍调用真实的 kmalloc/alloc_pages；正式源码没有故障注入开关或临时空实现。
 
 ## 6.8 测试与验证
 
-执行命令：
+在 WSL Ubuntu 中实际执行：
 
 ```bash
-make
-make qemu
+cd '/mnt/d/360MoveData/Users/huangyihao/Desktop/OS实验/lab4/nku-os/code'
+python3 tools/test_function2.py
 ```
 
-实际结果：
+首次运行默认将独立副本、build.log 与 run.log 保存到 `/mnt/d/360MoveData/Users/huangyihao/Desktop/OS实验/lab4/function2-check`。已存在的副本不会被覆盖；再次测试请指定新目录：
+
+```bash
+python3 tools/test_function2.py --output "../../function2-check-$(date +%Y%m%d-%H%M%S)"
+echo $?
+```
+
+脚本默认调用 PATH 中的 `qemu-system-riscv64`，本次实际使用 `/mnt/d/Tools/qemu-4.1.1/bin/qemu-system-riscv64`。可用 `--qemu /实际路径/qemu-system-riscv64` 指定其他可执行文件。测试脚本只接受 QEMU 正常退出、包含 ALL TESTS PASS 且没有 kernel panic/FAIL 的结果；超时或断言失败均返回非零。
+
+实际输出的关键部分：
 
 ```text
-TODO
+[Test Process Create] PASS
+[Function 2] PCB initialization PASS
+[Function 2] PID/list/hash and kernel trapframe PASS
+[Function 2] explicit stack and interrupt restoration PASS
+[Test Process Create] PASS
+[Function 2] allocation failures/rollback/process limit PASS
+[Function 2] ALL TESTS PASS (creation only; scheduling excluded)
 ```
 
-需要记录：
+脚本实际退出码为 0。`test_lab4_process_create()` 是工程提供的创建检查，测试入口直接调用；其余断言是本人补充的验证。
 
-```text
-是否编译通过
-是否链接通过
-是否能够进入 QEMU
-对应 Function 是否得到正确运行结果
-```
+| 测试范围 | 验证依据 |
+|---|---|
+| idle/init 初始状态 | 原有创建测试；PID、状态、父进程、启动栈、mm、context |
+| PCB 初始化 | 未初始化状态、PID -1、清零字段、内核页表和链表节点 |
+| 多线程创建 | PID 不重复、独立内核栈、哈希查找、普通链表长度、current 不变 |
+| 首次运行现场 | s0/s1、epc、a0、SPP/SPIE/SIE、context.ra/sp 与栈顶帧地址 |
+| 指定栈地址 | do_fork 的非零 stack 分支、原始模板不被改写 |
+| 中断状态 | 创建前开中断和关中断两种情形，调用后均保持原状态 |
+| 失败回滚 | PCB 失败、栈失败、非空父 mm 拒绝后空闲页数和进程计数不变 |
+| 边界输入 | 进程数达到上限、空 trapframe 返回对应错误且没有残留登记 |
 
-不要填写没有实际执行的测试结果。
+上限测试是在独立测试副本中临时把 `nr_process` 设为 `MAX_PROCESS` 来检查拒绝分支，随后恢复原值，没有实际创建 4096 个线程；该结果不等同于满负载压力测试。PCB 和栈申请失败也通过副本中的分配包装进行定点注入。
+
+构建仍有原有 kmalloc 的整数转指针警告，以及原有 test_lab4.c 调度测试函数类型不匹配警告。
+
+截图保留本人测试结果，文件名为 `report/images/huangyihao-lab4-function2-test.png`。
 
 ---
 
@@ -879,7 +903,7 @@ Function 1
 Function 2
 进程 / 内核线程创建
     ↓
-TODO：负责人完成后补充
+建立 idleproc/initproc、分配栈和 PID、准备 trapframe/context、登记并设为 RUNNABLE
 
 Function 3
 调度与上下文切换
@@ -997,16 +1021,13 @@ Function 1 当前已经完成源码编译验证。
 
 `page_insert()` 和 `page_remove()` 已不再产生链接错误。
 
-完整 QEMU 测试等待 Function 2 / Function 3 完成后统一进行。
-
 ---
 
 ## 10.2 Function 2
 
 **负责人：2413581-黄奕浩**
 
-TODO：负责人完成后填写本人实际结果。
-
+已完成六个创建函数，独立 QEMU 验证通过原有 Process Create 检查及补充分配失败、进程数上限、初始现场、中断状态等检查。
 ---
 
 ## 10.3 Function 3
@@ -1185,7 +1206,7 @@ tlb_invalidate(pgdir, la);
 
 ## 12.5 Function 2 / Function 3
 
-TODO：对应成员根据本人实现补充。
+Function 2 将普通函数和参数组织成新线程的初始现场：context 使第一次 switch_to 返回 forkret，trapframe 再使 sret 到达 kernel_thread_entry。RUNNABLE 只表示线程具备被调度条件；Function 3 负责选择并实际切换线程。当前已验证创建现场，实际切换仍待 Function 3。
 
 ---
 
@@ -1216,7 +1237,7 @@ Trap 入口
 
 因此 Lab4 是前面实验功能进一步组合的阶段。
 
-其他具体联系等待 Function 2 / Function 3 完成后由对应成员继续补充。
+Function 2 使用 Lab2 的页分配器建立每线程独立内核栈，使用 Lab3 的 trapframe、RESTORE_ALL 和 sret 组织首次运行路径，并通过保存/恢复中断状态保护进程登记。Function 3 的补充由对应成员完成。
 
 ---
 
@@ -1235,6 +1256,19 @@ page_remove()
 
 同时通过分析 Sv32、Sv39 和 Sv48，进一步理解了 RISC-V 多级页表结构，以及 `get_pte()` 中多级页表遍历代码相似的原因。
 
-Function 2 和 Function 3 将由对应成员根据实际代码实现继续补充。
+Function 2 中主要实现：
+
+```text
+alloc_proc()
+proc_init()
+kernel_thread()
+do_fork()
+copy_thread()
+copy_mm()
+```
+
+完成了进程控制块初始化、idleproc 与 initproc 创建、内核栈分配、初始中断帧和上下文设置，以及 PID 分配和进程登记。
+
+同时通过独立 QEMU 创建测试，进一步理解了内核线程首次运行现场的组织方式，以及资源分配失败时回收内核栈和进程控制块的处理过程。
 
 待三个部分全部完成后，再统一进行完整编译、QEMU 运行、官方测试以及最终实验总结。
