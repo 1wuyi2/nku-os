@@ -20,39 +20,39 @@
 | 成员 | 负责内容 |
 |---|---|
 | 2412771-谭锦睿 | Function 1：页面映射相关操作。负责 `page_insert()`、`page_remove()` 及其相关页表、页引用计数、TLB 刷新逻辑的实现和分析。 |
-| 2413581-黄奕浩 | Function 2：进程 / 内核线程创建。负责进程控制块初始化、内核栈分配、`do_fork()`、`copy_thread()` 等进程创建相关代码的实现和分析。 |
-| 2411302-王乐之 | Function 3：进程调度与上下文切换。负责 `schedule()`、`proc_run()`、`switch_to()` 以及相关调度和上下文保存恢复逻辑的实现和分析。 |
+| 2413581-黄奕浩 | Function 2：进程 / 内核线程创建相关内容。 |
+| 2411302-王乐之 | Function 3：进程调度与上下文切换相关内容。 |
 | 三人共同完成 | 最终代码整合、编译运行、QEMU 测试、官方测试以及实验报告整理。 |
 
 ### 拓展练习分工
 
 | 成员 | 拓展练习 |
 |---|---|
-| 2412771-谭锦睿 | Challenge 2：深入理解不同分页模式的工作原理。结合 Sv32、Sv39、Sv48 的区别，分析 `get_pte()` 中两段形式相似代码的原因；讨论当前 `get_pte()` 将页表项查找和页表页分配合并在一个函数中的设计是否合理，以及是否有必要拆分。 |
-| 2411302-王乐之 | Challenge 1：说明 `local_intr_save(intr_flag); ... local_intr_restore(intr_flag);` 如何实现中断状态的保存、关闭和恢复。 |
-| 2413581-黄奕浩 | 无单独 Challenge，负责 Function 2：进程 / 内核线程创建部分及对应实验报告。 |
+| 2412771-谭锦睿 | Challenge 2：分析 Sv32、Sv39、Sv48 分页模式及 `get_pte()` 的设计。 |
+| 2411302-王乐之 | Challenge 1：分析 `local_intr_save()` / `local_intr_restore()` 如何实现中断状态保存、关闭和恢复。 |
+| 2413581-黄奕浩 | 无单独 Challenge，主要完成本人 Function 2 及对应报告。 |
 
 ### 任务完成情况
 
-- [ ] Function 1：完成 `page_insert()` / `page_remove()`
-- [ ] Function 2：完成进程 / 内核线程创建相关功能
-- [ ] Function 3：完成调度与上下文切换
-- [ ] 完成三个 Function 的代码整合
-- [ ] 完成编译
-- [ ] 完成 QEMU 运行验证
-- [ ] 完成官方测试
-- [ ] 完成拓展练习分析
-- [ ] 完成实验报告
-- [ ] 整理实际使用的 Prompt
+- [x] 恢复 Lab2 / Lab3 前置依赖
+- [x] Function 1：完成 `page_insert()` / `page_remove()`
+- [ ] Function 2：待对应成员完成
+- [ ] Function 3：待对应成员完成
+- [ ] 三人代码整合
+- [ ] 完整编译
+- [ ] QEMU 运行验证
+- [ ] 官方测试
+- [ ] 完善实验报告
+- [ ] 整理完整 Prompt
 
 ### 报告分工
 
 | 成员 | 报告负责内容 |
 |---|---|
-| 2412771-谭锦睿 | 页面映射、`page_insert()`、`page_remove()` 以及页表相关拓展练习 |
-| 2413581-黄奕浩 | 进程控制块、进程创建、`do_fork()`、`copy_thread()` 及新线程首次运行流程 |
-| 2411302-王乐之 | `schedule()`、`proc_run()`、`switch_to()`、中断保护及上下文切换 |
-| 三人共同完成 | 整体流程分析、实验结果、测试记录、问题分析和最终报告整理 |
+| 2412771-谭锦睿 | 页面映射、`page_insert()`、`page_remove()`、分页模式及 `get_pte()` Challenge |
+| 2413581-黄奕浩 | Function 2 实际实现、代码分析、测试结果 |
+| 2411302-王乐之 | Function 3 实际实现、中断保护 Challenge、测试结果 |
+| 三人共同完成 | 整体测试、实验问题、最终总结 |
 
 实际使用的 Prompt 统一整理在：
 
@@ -64,30 +64,20 @@ report/prompt.md
 
 # 一、实验目的
 
-本实验主要学习操作系统中的进程管理机制，在前面实验已经实现的物理内存管理、页表和 Trap 机制基础上，进一步加入内核线程、进程控制块、调度以及上下文切换等功能。
+本实验在前面物理内存管理、页表以及 Trap 机制的基础上，进一步学习操作系统中的进程管理机制。
 
-通过本实验，需要理解操作系统如何表示一个进程、如何创建新的执行实体、如何保存和恢复进程执行状态，以及如何通过调度机制让不同进程共享 CPU。
+主要目标包括：
 
-主要目标如下：
-
-1. 理解进程和内核线程的基本概念；
-2. 理解 `proc_struct` 进程控制块的结构和作用；
-3. 理解页面映射建立、替换和删除的过程；
-4. 理解物理页引用计数的作用；
-5. 理解 `do_fork()` 创建新进程的整体流程；
-6. 理解 `copy_thread()` 如何构造新线程第一次运行所需的执行现场；
-7. 理解进程从创建到进入可运行状态的过程；
-8. 理解 `schedule()` 的基本调度过程；
-9. 理解 `proc_run()` 和 `switch_to()` 的作用；
-10. 理解上下文切换过程中寄存器保存与恢复机制；
-11. 理解调度过程中关闭和恢复中断的原因；
-12. 通过编译、QEMU 运行以及测试验证实验实现。
+1. 理解页面映射建立、替换和删除过程；
+2. 理解物理页引用计数的作用；
+3. 理解进程控制块及进程创建的基本过程；
+4. 理解进程调度与上下文切换机制；
+5. 理解 Lab2、Lab3 中已经实现的内存管理和 Trap 机制如何继续为 Lab4 服务；
+6. 通过编译和运行测试验证 Lab4 实现。
 
 ---
 
 # 二、实验环境
-
-## 2.1 系统与开发环境
 
 | 项目 | 环境 |
 |---|---|
@@ -96,141 +86,67 @@ report/prompt.md
 | 交叉编译工具链 | `riscv64-unknown-elf-*` |
 | 虚拟机 | QEMU |
 | 固件 | OpenSBI |
-| 调试工具 | RISC-V GDB |
 | 版本管理 | Git |
 | 实验分支 | `lab4` |
 
-## 2.2 AI 工具
-
-| 成员 | AI 工具 | 用途 |
-|---|---|---|
-| 2412771-谭锦睿 | ChatGPT / Codex | 实验要求分析、页表和页面映射代码理解、实现与检查 |
-| 2413581-黄奕浩 | ChatGPT / Codex | 进程创建代码理解、实现与调用关系分析 |
-| 2411302-王乐之 | ChatGPT / Codex | 调度、上下文切换代码理解与检查 |
-
-完整 Prompt 见：
-
-```text
-report/prompt.md
-```
-
 ---
 
-# 三、实验整体逻辑分析
+# 三、实验前置依赖恢复
 
-## 3.1 Lab4 与前面实验的关系
+Lab4 依赖 Lab2 和 Lab3 中已经实现的部分代码。
 
-Lab4 并不是从头建立一个新的子系统，而是在前面实验提供的机制上继续加入进程管理。
-
-整体关系可以表示为：
+按照实验框架中的 `lab2` / `lab3` 注释进行了扫描，共找到：
 
 ```text
-Lab1
-最小可执行内核
-    ↓
-Lab2
-物理内存管理 + 页表
-    ↓
-Lab3
-Trap + 中断 + 异常
-    ↓
-Lab4
-进程管理 + 调度 + 上下文切换
+Lab2：2 处
+Lab3：3 处
+共涉及 4 个源码文件
 ```
 
-Lab4 中的进程管理需要同时依赖：
+涉及：
 
 ```text
-物理内存管理
-      +
-虚拟内存与页表
-      +
-Trap 机制
-      +
-内核栈
-      +
-进程上下文
-      +
-调度机制
+code/kern/mm/pmm.c
+code/kern/mm/default_pmm.c
+code/kern/trap/trap.c
+code/kern/trap/trapentry.S
 ```
 
-因此 Lab4 将前面较为独立的内核机制进一步组合起来。
-
----
-
-## 3.2 Lab4 主要内容
-
-本实验可以大致分为三个部分：
+恢复内容包括：
 
 ```text
-Function 1
-页面映射管理
-page_insert / page_remove
+Lab2：
+page_init()
+物理页 Best-Fit 分配器
 
-        ↓
-
-Function 2
-进程和内核线程创建
-do_fork / copy_thread
-
-        ↓
-
-Function 3
-调度和上下文切换
-schedule / proc_run / switch_to
+Lab3：
+interrupt_handler()
+exception_handler()
+RESTORE_ALL
+__alltraps
 ```
 
-三部分之间并不是完全独立的。
+迁移过程中保留了实验代码中原有的 Lab2 / Lab3 注释，没有修改 Lab4 新 Function。
 
-新的进程首先需要正确的内存管理和运行环境，然后由进程创建函数建立 PCB、内核栈以及执行上下文，最后进入可运行状态，由调度器决定什么时候真正获得 CPU。
-
----
-
-## 3.3 从创建到运行的整体流程
-
-一个新线程并不是创建之后立即开始执行。
-
-大致流程为：
+恢复完成后：
 
 ```text
-创建线程请求
-    ↓
-do_fork()
-    ↓
-分配并初始化 proc_struct
-    ↓
-分配内核栈
-    ↓
-建立内存管理信息
-    ↓
-copy_thread()
-    ↓
-建立 TrapFrame 和 Context
-    ↓
-分配 PID
-    ↓
-加入进程管理结构
-    ↓
-设置为 PROC_RUNNABLE
-    ↓
-等待调度
-    ↓
-schedule()
-    ↓
-proc_run()
-    ↓
-switch_to()
-    ↓
-新线程第一次获得 CPU
+make clean
+make
 ```
 
-因此：
+源码编译阶段可以通过。
+
+此时剩余链接错误为：
 
 ```text
-创建进程 ≠ 进程已经运行
+page_insert
+page_remove
+proc_init
+cpu_idle
 ```
 
-创建阶段只是使进程具备能够被操作系统调度的条件。
+均属于 Lab4 尚未完成的 Function。
 
 ---
 
@@ -240,318 +156,371 @@ switch_to()
 
 ## 4.1 任务要求
 
-本部分主要完成页面映射相关操作，重点分析：
+本部分主要实现：
 
 ```c
 page_insert()
 page_remove()
 ```
 
-需要理解一个物理页如何被插入到指定虚拟地址的页表映射中，以及删除映射时引用计数、页表项和 TLB 应如何处理。
+主要文件：
+
+```text
+code/kern/mm/pmm.c
+```
+
+需要正确处理：
+
+- 建立新的虚拟地址到物理页的映射；
+- 替换已有映射；
+- 删除已有映射；
+- 维护页面引用计数；
+- 必要时释放物理页；
+- 修改页表后刷新 TLB。
 
 ---
 
-## 4.2 主要涉及文件
+## 4.2 page_remove_pte()
 
-主要涉及：
+`page_remove_pte()` 用于删除一个已经存在的页表映射。
 
-```text
-kern/mm/pmm.c
-kern/mm/pmm.h
-libs/riscv.h
+核心代码：
+
+```c
+static void
+page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep)
+{
+    if (*ptep & PTE_V)
+    {
+        struct Page *page = pte2page(*ptep);
+        if (page_ref_dec(page) == 0)
+        {
+            free_page(page);
+        }
+        *ptep = 0;
+        tlb_invalidate(pgdir, la);
+    }
+}
 ```
 
-具体以实验代码实际位置为准。
+主要流程：
+
+```text
+检查 PTE 是否有效
+        ↓
+找到对应物理页
+        ↓
+减少引用计数
+        ↓
+引用计数为 0 时释放物理页
+        ↓
+清除 PTE
+        ↓
+刷新 TLB
+```
+
+只有引用计数降为 0 时才能释放物理页，因为同一个物理页可能仍然被其他虚拟地址映射。
 
 ---
 
-## 4.3 相关基础
+## 4.3 page_remove()
 
-页面映射建立过程的核心关系为：
+实现：
 
-```text
-虚拟地址 la
-    ↓
-页表查询
-    ↓
-PTE
-    ↓
-物理页 Page
+```c
+void
+page_remove(pde_t *pgdir, uintptr_t la)
+{
+    pte_t *ptep = get_pte(pgdir, la, 0);
+    if (ptep != NULL)
+    {
+        page_remove_pte(pgdir, la, ptep);
+    }
+}
 ```
 
-页表项不仅记录物理页地址，还包含：
+这里调用：
 
-```text
-PTE_V
-PTE_R
-PTE_W
-PTE_X
-PTE_U
+```c
+get_pte(pgdir, la, 0)
 ```
 
-等权限和有效位。
+其中 `create = 0`。
 
-此外，一个物理页可能同时被多个映射引用，因此需要：
-
-```text
-page_ref(page)
-```
-
-记录当前页面被引用的次数。
+原因是该函数只是删除映射，如果页表本来不存在，就不应该为了执行删除操作而重新分配新的页表页。
 
 ---
 
 ## 4.4 page_insert()
 
-### 4.4.1 主要作用
+实现：
 
-`page_insert()` 的作用是：
+```c
+int
+page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm)
+{
+    pte_t *ptep = get_pte(pgdir, la, 1);
+    if (ptep == NULL)
+    {
+        return -E_NO_MEM;
+    }
 
-> 将物理页 `page` 映射到页表 `pgdir` 中虚拟地址 `la` 对应的位置。
+    page_ref_inc(page);
 
-整体过程可以概括为：
+    if (*ptep & PTE_V)
+    {
+        struct Page *old_page = pte2page(*ptep);
+
+        if (old_page == page)
+        {
+            page_ref_dec(page);
+        }
+        else
+        {
+            page_remove_pte(pgdir, la, ptep);
+        }
+    }
+
+    *ptep = pte_create(page2ppn(page), perm);
+    tlb_invalidate(pgdir, la);
+
+    return 0;
+}
+```
+
+首先：
+
+```c
+get_pte(pgdir, la, 1)
+```
+
+查找目标 PTE。
+
+这里 `create = 1`，说明如果中间页表不存在，可以分配新的页表页。
+
+如果创建失败：
+
+```c
+return -E_NO_MEM;
+```
+
+---
+
+## 4.5 page_insert() 的三种情况
+
+### 情况一：原地址没有映射
+
+直接：
+
+```text
+page_ref_inc(page)
+        ↓
+写入新的 PTE
+        ↓
+刷新 TLB
+```
+
+新页面增加一个引用。
+
+### 情况二：原地址已经映射到同一个页面
+
+首先：
+
+```c
+page_ref_inc(page);
+```
+
+然后发现：
+
+```c
+old_page == page
+```
+
+此时执行：
+
+```c
+page_ref_dec(page);
+```
+
+抵消刚刚增加的引用。
+
+因此引用计数保持不变，只更新新的页表权限。
+
+### 情况三：原地址映射到另一个页面
+
+首先增加新页面引用计数，然后：
+
+```c
+page_remove_pte(pgdir, la, ptep);
+```
+
+删除旧映射。
+
+旧页面的引用计数随之减少，如果引用数为 0，则释放旧页面。
+
+之后再写入新页面映射。
+
+---
+
+## 4.6 为什么需要刷新 TLB
+
+CPU 访问虚拟地址时，并不一定每次都重新查询页表，而可能直接使用 TLB 中缓存的地址转换结果。
+
+如果已经修改了页表，但 TLB 中仍保存旧映射，则 CPU 可能继续使用旧的物理地址。
+
+因此建立、替换或者删除页表映射后需要执行：
+
+```c
+tlb_invalidate(pgdir, la);
+```
+
+使旧地址转换失效。
+
+---
+
+## 4.7 Function 1 调用关系
+
+插入：
 
 ```text
 page_insert()
     ↓
-get_pte(pgdir, la, 1)
+get_pte()
     ↓
-找到 / 创建对应 PTE
+page_ref_inc()
     ↓
-增加新页面引用计数
+检查旧映射
     ↓
-检查原映射
+page_remove_pte()（必要时）
     ↓
-必要时删除旧映射
+写入新 PTE
     ↓
-写入新的 PTE
-    ↓
-刷新 TLB
+tlb_invalidate()
 ```
 
-### 4.4.2 需要注意的问题
-
-如果该虚拟地址原本没有映射，则可以直接建立新映射。
-
-如果该地址已经映射到其他物理页，则需要先删除旧映射并正确处理旧页面的引用计数。
-
-如果原本映射的就是同一个物理页，则需要避免引用计数出现错误。
-
-TODO：完成代码后结合实际实现补充。
-
----
-
-## 4.5 page_remove()
-
-### 4.5.1 主要作用
-
-`page_remove()` 用于删除指定虚拟地址对应的页面映射。
-
-总体过程：
+删除：
 
 ```text
 page_remove()
     ↓
 get_pte()
     ↓
-查找对应 PTE
+page_remove_pte()
     ↓
-判断是否存在有效映射
+page_ref_dec()
     ↓
-找到物理页
-    ↓
-减少引用计数
-    ↓
-必要时释放页面
+free_page()（引用计数为 0）
     ↓
 清除 PTE
     ↓
-刷新 TLB
-```
-
-### 4.5.2 为什么需要刷新 TLB
-
-CPU 访问虚拟地址时，并不一定每次都重新查询页表，而可能直接使用 TLB 中缓存的地址转换结果。
-
-如果页表已经改变，但 TLB 中仍然保存旧映射，则可能继续访问旧物理地址。
-
-因此删除或修改页表映射后，需要进行对应的 TLB 刷新操作。
-
----
-
-## 4.6 关键代码
-
-TODO：实现后填写。
-
-```c
-// page_insert()
-
-TODO
-```
-
-```c
-// page_remove()
-
-TODO
+tlb_invalidate()
 ```
 
 ---
 
-## 4.7 Function 1 调用关系
+# 五、Challenge 2：分页模式与 get_pte()
 
-```text
-page_insert
-    ↓
-get_pte
-    ↓
-page_ref_inc
-    ↓
-page_remove_pte（必要时）
-    ↓
-写入新 PTE
-    ↓
-tlb_invalidate
-```
+**负责人：2412771-谭锦睿**
 
-删除过程：
+## 5.1 Sv32、Sv39、Sv48
 
-```text
-page_remove
-    ↓
-get_pte
-    ↓
-page_remove_pte
-    ↓
-page_ref_dec
-    ↓
-free_page（引用计数为 0）
-    ↓
-清除 PTE
-    ↓
-tlb_invalidate
-```
-
-具体以实验代码为准。
-
----
-
-## 4.8 拓展练习一：Sv32、Sv39、Sv48 的区别
-
-RISC-V 根据不同地址宽度支持不同的页表模式。
+RISC-V 支持多种分页模式。
 
 ### Sv32
 
-主要用于 32 位 RISC-V。
-
-采用：
-
-```text
-两级页表
-```
-
-虚拟地址大致划分为：
+主要用于 RV32：
 
 ```text
 VPN[1] | VPN[0] | page offset
 ```
 
+使用二级页表。
+
 ### Sv39
 
-RV64 中常用的分页模式。
-
-采用：
-
-```text
-三级页表
-```
-
-虚拟地址划分为：
+用于 RV64：
 
 ```text
 VPN[2] | VPN[1] | VPN[0] | page offset
 ```
 
-每级 VPN 为 9 位，页内偏移为 12 位。
+使用三级页表。
 
-因此：
+每级 VPN 为 9 位，页内偏移为 12 位：
 
 ```text
 9 + 9 + 9 + 12 = 39 bit
 ```
 
-### Sv48
+当前实验使用的是 Sv39。
 
-采用：
+代码中可以看到三级索引：
 
 ```text
-四级页表
+PDX1
+PDX0
+PTX
 ```
 
-比 Sv39 再增加一级 VPN。
+同时启动页表使用：
 
-虚拟地址结构：
+```text
+boot_page_table_sv39
+```
+
+因此可以确定当前工程采用 Sv39。
+
+### Sv48
+
+Sv48 在 Sv39 基础上增加一级页表：
 
 ```text
 VPN[3] | VPN[2] | VPN[1] | VPN[0] | page offset
 ```
 
+使用四级页表。
+
 ---
 
-## 4.9 拓展练习二：为什么 get_pte() 中两段代码很相似
+## 5.2 为什么 get_pte() 中存在两段相似代码
 
-`get_pte()` 需要逐级查询多级页表。
+`get_pte()` 的主要任务是逐级遍历多级页表。
 
-例如 Sv39 需要：
-
-```text
-一级页表
-    ↓
-二级页表
-    ↓
-三级页表
-```
-
-对于每一级中间页表，处理步骤实际上都类似：
+每一级中间页表的处理过程基本相同：
 
 ```text
-取当前页表项
-    ↓
-判断是否有效
-    ↓
-若不存在且 create = 1
-    ↓
+根据 VPN 获得当前页表项
+        ↓
+检查页表项是否有效
+        ↓
+如果无效且 create = 1
+        ↓
 分配新的页表页
-    ↓
-初始化
-    ↓
-写入上一级页表项
-    ↓
+        ↓
+初始化新的页表页
+        ↓
+将页表页地址写入当前页表项
+        ↓
 进入下一级页表
 ```
 
-因此代码中处理不同级页表的两部分逻辑会高度相似。
+因此多级页表中不同层级的代码形式会非常相似。
 
-这种重复本质上来源于：
-
-> 多级页表的每一级使用相同的数据结构和类似的查询规则。
+这种相似并不是偶然的，而是因为不同层级的页表使用了类似的数据结构和遍历方法。
 
 ---
 
-## 4.10 拓展练习三：查找和分配是否应该拆开
+## 5.3 get_pte() 是否应该拆分
 
-当前 `get_pte()` 一般通过 `create` 参数同时支持：
+当前接口：
 
-```text
-只查找
+```c
+get_pte(pgdir, la, create)
 ```
 
-和：
+同时支持查询和创建。
 
-```text
-不存在时创建页表
-```
-
-优点是接口统一：
+例如：
 
 ```c
 get_pte(pgdir, la, 0);
@@ -559,753 +528,293 @@ get_pte(pgdir, la, 0);
 
 表示只查找。
 
+而：
+
 ```c
 get_pte(pgdir, la, 1);
 ```
 
-表示必要时创建。
+表示页表不存在时允许创建。
 
-但它也使函数同时承担：
+这种设计的优点是：
 
 ```text
-查询
-+
+接口统一
+调用简单
+复用了页表遍历逻辑
+```
+
+但问题是查询函数同时可能执行：
+
+```text
 内存分配
-+
 页表修改
 ```
 
-多个职责。
+因此存在一定副作用。
 
-因此从软件设计角度，也可以拆分成类似：
+另一种设计可以拆成：
 
 ```text
 find_pte()
-```
-
-和：
-
-```text
 create_pte()
 ```
 
-两个接口。
+这样职责更加清晰，但会增加接口数量，而且可能产生重复的页表遍历逻辑。
 
-拆分后的代码职责更加明确，但会增加接口数量和部分重复代码。
+因此两种设计并没有绝对优劣。
 
-本实验框架使用 `create` 参数属于一种较简洁的实现方式。
+当前 uCore 使用 `create` 参数，是在接口简洁性和职责单一性之间做出的设计权衡。
 
 ---
 
-## 4.11 测试与验证
+## 5.4 Function 1 编译与验证
 
-TODO：Function 1 完成后填写。
-
-编译：
+执行：
 
 ```bash
 cd ~/os-lab/nku-os/code
-
 make
 ```
 
-检查：
+结果：
+
+```text
+pmm.c 编译通过。
+
+page_insert 不再出现 undefined reference。
+page_remove 不再出现 undefined reference。
+```
+
+此时最终链接仍然存在：
+
+```text
+proc_init
+cpu_idle
+```
+
+未定义。
+
+这两个函数属于其他成员负责的 Function，因此本部分没有继续修改。
+
+同时执行：
 
 ```bash
 git diff --check
 ```
 
-运行：
+结果通过。
 
-```bash
-make qemu
-```
-
-测试结果：
+工程中已经存在：
 
 ```text
-TODO
+check_pgdir()
+check_boot_pgdir()
+test_lab4_pmm_basic()
+```
+
+等页面映射测试代码。
+
+但由于完整内核尚未链接成功，目前无法启动 QEMU 实际运行这些测试。
+
+因此当前 Function 1 的验证结果为：
+
+```text
+代码编译通过
+符号链接问题已经解决
+完整运行测试等待三人代码合并后完成
 ```
 
 ---
 
-# 五、Function 2：进程与内核线程创建
+# 六、Function 2：进程 / 内核线程创建
 
 **负责人：2413581-黄奕浩**
 
-## 5.1 任务要求
-
-本部分主要分析并实现进程 / 内核线程的创建过程。
-
-重点函数包括：
-
-```text
-alloc_proc()
-do_fork()
-copy_thread()
-kernel_thread()
-```
-
-需要理解操作系统如何从零建立一个能够被调度运行的新进程。
-
----
-
-## 5.2 主要涉及文件
-
-主要涉及：
-
-```text
-kern/process/proc.c
-kern/process/proc.h
-```
-
-同时与：
-
-```text
-kern/mm/
-kern/trap/
-```
-
-中的相关数据结构存在联系。
-
----
-
-## 5.3 proc_struct
-
-`proc_struct` 是 ucore 中用于描述一个进程的核心数据结构，相当于操作系统理论中的 PCB。
-
-主要成员包括：
-
-```text
-state
-pid
-runs
-kstack
-need_resched
-parent
-mm
-context
-tf
-cr3
-flags
-name
-list_link
-hash_link
-```
-
----
-
-## 5.4 主要成员作用
-
-### state
-
-表示当前进程状态。
-
-例如：
-
-```text
-PROC_UNINIT
-PROC_SLEEPING
-PROC_RUNNABLE
-PROC_ZOMBIE
-```
-
-### pid
-
-进程唯一编号。
-
-### runs
-
-记录进程被调度运行的次数。
-
-### kstack
-
-该进程的内核栈地址。
-
-### need_resched
-
-表示当前进程是否需要重新调度。
-
-### parent
-
-指向父进程。
-
-### mm
-
-指向进程的内存管理结构。
-
-对于部分内核线程：
-
-```text
-mm = NULL
-```
-
-### context
-
-保存进程进行上下文切换时需要恢复的寄存器。
-
-### tf
-
-指向该进程内核栈中的 TrapFrame。
-
-### cr3
-
-保存页表相关信息。
-
----
-
-## 5.5 alloc_proc()
-
-`alloc_proc()` 的主要作用是：
-
-> 分配一个新的 `proc_struct` 并初始化其中各字段。
-
-新申请的进程控制块最开始还不是可运行进程。
-
-整体流程：
-
-```text
-kmalloc(sizeof(struct proc_struct))
-    ↓
-初始化字段
-    ↓
-state = PROC_UNINIT
-    ↓
-pid = -1
-    ↓
-初始化 context / tf / mm 等成员
-```
-
-TODO：结合实际代码填写最终初始化值。
-
----
-
-## 5.6 do_fork()
-
-`do_fork()` 是进程创建过程中的核心函数。
-
-总体过程可以概括为：
-
-```text
-do_fork()
-    ↓
-检查进程数量
-    ↓
-alloc_proc()
-    ↓
-建立父子关系
-    ↓
-setup_kstack()
-    ↓
-copy_mm()
-    ↓
-copy_thread()
-    ↓
-get_pid()
-    ↓
-加入进程链表 / 哈希表
-    ↓
-wakeup_proc()
-    ↓
-返回新进程 PID
-```
-
----
-
-## 5.7 setup_kstack()
-
-每个内核线程需要独立的内核栈。
-
-因此创建进程时需要为其分配：
-
-```text
-KSTACKPAGE
-```
-
-个页面作为内核栈。
-
-内核栈主要用于：
-
-```text
-函数调用
-TrapFrame
-异常和中断处理
-内核态执行
-```
-
----
-
-## 5.8 copy_thread()
-
-`copy_thread()` 负责构造新线程第一次被调度运行时需要的执行现场。
-
-其中需要设置：
-
-```text
-TrapFrame
-Context
-```
-
-典型关系：
-
-```text
-proc->tf
-    ↓
-新线程的 TrapFrame
-
-proc->context
-    ↓
-第一次 switch_to 后应该从哪里继续执行
-```
-
-因此 `copy_thread()` 是：
-
-> “创建一个进程”
-
-和
-
-> “这个进程以后如何第一次开始运行”
-
-之间非常关键的连接点。
-
-TODO：结合实际代码分析各寄存器设置。
-
----
-
-## 5.9 Context 与 TrapFrame 的区别
-
-两者都保存处理器状态，但用途不同。
-
-### TrapFrame
-
-主要用于：
-
-```text
-Trap / Interrupt / Exception
-```
-
-发生时保存完整现场。
-
-来自 Lab3。
-
-### Context
-
-主要用于：
-
-```text
-进程上下文切换
-```
-
-只需要保存按照调用约定必须跨函数调用保持的寄存器以及：
-
-```text
-ra
-sp
-```
-
-等关键寄存器。
-
-因此：
-
-```text
-TrapFrame
-    ↓
-Trap 上下文
-
-Context
-    ↓
-进程调度上下文
-```
-
----
-
-## 5.10 kernel_thread()
-
-`kernel_thread()` 用于创建一个内核线程。
-
-其核心思想不是直接调用目标函数，而是先构造一个特殊的 TrapFrame，使新进程第一次运行时进入指定的内核线程入口。
-
-流程：
-
-```text
-kernel_thread(fn, arg)
-    ↓
-构造临时 TrapFrame
-    ↓
-do_fork()
-    ↓
-copy_thread()
-    ↓
-建立新进程执行上下文
-```
-
----
-
-## 5.11 idleproc 与 initproc
-
-系统初始化进程管理模块后，会出现两个重要进程。
-
-### idleproc
-
-`idleproc` 对应系统最初的空闲进程。
-
-它的作用主要是：
-
-```text
-当没有其他进程需要运行时
-保持 CPU 有一个合法执行主体
-```
-
-同时：
-
-```text
-current = idleproc
-```
-
-使系统从一开始就具有合法的当前进程。
-
-### initproc
-
-`initproc` 是通过内核线程创建机制建立的第一个真正的新进程。
-
-因此：
-
-```text
-idleproc
-    ↓
-系统启动时人工建立
-
-initproc
-    ↓
-通过 kernel_thread / do_fork 创建
-```
-
----
-
-## 5.12 拓展练习：新线程第一次运行的完整链路
-
-一个新内核线程第一次开始运行的大致过程：
-
-```text
-kernel_thread()
-    ↓
-do_fork()
-    ↓
-alloc_proc()
-    ↓
-setup_kstack()
-    ↓
-copy_thread()
-    ↓
-建立 context
-    ↓
-进程进入 PROC_RUNNABLE
-    ↓
-schedule()
-    ↓
-选中新进程
-    ↓
-proc_run()
-    ↓
-switch_to()
-    ↓
-恢复新进程 context
-    ↓
-进入 forkret
-    ↓
-利用 TrapFrame 恢复执行现场
-    ↓
-进入 kernel_thread_entry
-    ↓
-执行目标函数 fn(arg)
-```
-
-这一流程说明：
-
-> 新线程第一次运行并不是直接由 `do_fork()` 调用目标函数，而是通过人为构造 Context 和 TrapFrame，使调度器第一次切换到该进程时自然进入指定入口。
-
----
-
-## 5.13 测试与验证
-
-TODO
-
-```bash
-make
-make qemu
-```
-
-测试结果：
-
-```text
-TODO
-```
-
----
-
-# 六、Function 3：进程调度与上下文切换
-
-**负责人：2411302-王乐之**
+> 本节由负责人根据本人实际代码实现补充。
 
 ## 6.1 任务要求
 
-本部分主要实现和分析：
+TODO：根据实验指导书和本人实际负责范围填写。
+
+建议说明：
 
 ```text
-schedule()
-proc_run()
-switch_to()
-```
-
-理解操作系统如何：
-
-```text
-选择下一个进程
-      ↓
-切换地址空间
-      ↓
-切换 CPU 寄存器上下文
+Function 2 需要实现什么功能
+为什么需要这些功能
+主要涉及哪些函数
 ```
 
 ---
 
 ## 6.2 主要涉及文件
 
-主要涉及：
-
-```text
-kern/process/proc.c
-kern/schedule/
-kern/process/switch.S
-```
-
-具体文件以实验代码为准。
-
----
-
-## 6.3 schedule()
-
-`schedule()` 的核心任务是：
-
-> 从可运行进程中选择一个进程作为下一个运行对象。
-
-因此调度本身解决的是：
-
-```text
-接下来运行谁？
-```
-
-而不是：
-
-```text
-具体如何切换 CPU 状态？
-```
-
----
-
-## 6.4 基本流程
-
-Lab4 中的调度过程可以概括为：
-
-```text
-schedule()
-    ↓
-关闭中断
-    ↓
-current->need_resched = 0
-    ↓
-寻找 PROC_RUNNABLE 进程
-    ↓
-选择 next
-    ↓
-如果没有则选择 idleproc
-    ↓
-next->runs++
-    ↓
-proc_run(next)
-    ↓
-恢复中断
-```
-
-TODO：结合实际代码补充当前具体遍历方式。
-
----
-
-## 6.5 proc_run()
-
-`proc_run()` 负责执行实际的进程切换准备。
-
-大致过程：
-
-```text
-proc_run(next)
-    ↓
-判断 next != current
-    ↓
-保存当前中断状态
-    ↓
-关闭中断
-    ↓
-prev = current
-    ↓
-current = next
-    ↓
-切换页表 / 地址空间
-    ↓
-switch_to(&prev->context, &next->context)
-    ↓
-恢复中断状态
-```
-
-因此：
-
-```text
-schedule
-```
-
-负责“选择谁”，而：
-
-```text
-proc_run
-```
-
-负责“切过去”。
-
----
-
-## 6.6 switch_to()
-
-`switch_to()` 是进程上下文切换的最低层实现。
-
-其核心过程是：
-
-```text
-保存 prev 的寄存器
-        ↓
-恢复 next 的寄存器
-        ↓
-CPU 从 next 上次停止的位置继续执行
-```
-
-在 RISC-V 中，按照函数调用约定，主要需要保存：
-
-```text
-ra
-sp
-s0 ~ s11
-```
-
-等需要跨函数调用保持的寄存器。
-
----
-
-## 6.7 为什么不需要保存全部寄存器
-
-上下文切换由普通函数调用过程触发。
-
-按照 RISC-V ABI：
-
-```text
-caller-saved
-```
-
-寄存器本身就允许被被调用函数修改。
-
-而：
-
-```text
-callee-saved
-```
-
-寄存器必须在函数调用前后保持不变。
-
-因此 `switch_to()` 只需要保存真正需要跨调度保持的寄存器。
-
----
-
-## 6.8 schedule 和 switch_to 的区别
-
-```text
-schedule()
-```
-
-解决：
-
-> 应该运行哪个进程？
-
-```text
-proc_run()
-```
-
-解决：
-
-> 如何准备切换到这个进程？
-
-```text
-switch_to()
-```
-
-解决：
-
-> CPU 寄存器如何真正从旧进程切换到新进程？
-
-因此：
-
-```text
-schedule
-    ↓
-策略
-
-proc_run
-    ↓
-进程切换控制
-
-switch_to
-    ↓
-机器级上下文切换
-```
-
----
-
-## 6.9 为什么调度时要关闭中断
-
-进程调度过程中会修改：
-
-```text
-current
-进程状态
-Context
-地址空间
-CPU 寄存器
-```
-
-如果执行到一半突然产生中断，内核可能看到一个不一致的状态。
+TODO：根据实际修改文件填写。
 
 例如：
 
 ```text
-current 已经指向 next
+code/kern/process/proc.c
+code/kern/process/proc.h
 ```
 
-但是：
-
-```text
-CPU 仍然在执行 prev 的上下文
-```
-
-此时如果中断处理代码再次访问 `current`，就可能发生错误。
-
-因此调度和上下文切换中的关键操作需要作为一个临界区执行。
+最终以本人实际修改为准。
 
 ---
 
-## 6.10 local_intr_save() / local_intr_restore()
+## 6.3 实现过程
 
-典型使用：
+TODO：根据实际代码填写。
+
+建议按照实际调用顺序分析：
+
+```text
+入口函数
+    ↓
+关键步骤 1
+    ↓
+关键步骤 2
+    ↓
+关键步骤 3
+    ↓
+最终结果
+```
+
+不要只复制代码，需要说明每一步为什么这样实现。
+
+---
+
+## 6.4 关键代码
+
+TODO：粘贴本人真正修改或补充的核心代码。
 
 ```c
-bool intr_flag;
+// TODO
+```
 
+---
+
+## 6.5 关键数据结构分析
+
+TODO：根据实际 Function 2 使用的数据结构填写。
+
+重点分析实际使用到的字段，不需要把整个结构体全部抄一遍。
+
+---
+
+## 6.6 Function 2 调用关系
+
+TODO：结合实际代码整理。
+
+```text
+TODO
+```
+
+---
+
+## 6.7 实现中遇到的问题
+
+TODO：根据本人真实开发过程填写。
+
+如果没有明显问题，可以删除本节。
+
+---
+
+## 6.8 测试与验证
+
+执行命令：
+
+```bash
+make
+make qemu
+```
+
+实际结果：
+
+```text
+TODO
+```
+
+需要记录：
+
+```text
+是否编译通过
+是否链接通过
+是否能够进入 QEMU
+对应 Function 是否得到正确运行结果
+```
+
+不要填写没有实际执行的测试结果。
+
+---
+
+# 七、Function 3：进程调度与上下文切换
+
+**负责人：2411302-王乐之**
+
+> 本节由负责人根据本人实际代码实现补充。
+
+## 7.1 任务要求
+
+TODO：根据实验指导书和本人实际负责范围填写。
+
+---
+
+## 7.2 主要涉及文件
+
+TODO：根据实际修改文件填写。
+
+例如可能涉及：
+
+```text
+code/kern/process/
+code/kern/schedule/
+```
+
+具体以本人实际实现为准。
+
+---
+
+## 7.3 实现过程
+
+TODO：根据实际代码填写。
+
+建议重点说明：
+
+```text
+调度入口
+如何选择下一个执行实体
+什么时候发生上下文切换
+切换前后哪些状态发生变化
+```
+
+---
+
+## 7.4 关键代码
+
+TODO：粘贴本人实际修改代码。
+
+```c
+// TODO
+```
+
+---
+
+## 7.5 调用关系
+
+TODO：根据实际调用关系填写。
+
+```text
+TODO
+```
+
+---
+
+## 7.6 Challenge 1：中断状态保存与恢复
+
+需要说明：
+
+```c
 local_intr_save(intr_flag);
 
 /* 临界区 */
@@ -1313,354 +822,83 @@ local_intr_save(intr_flag);
 local_intr_restore(intr_flag);
 ```
 
-`local_intr_save()` 不只是简单关闭中断。
+如何实现中断状态的保存、关闭和恢复。
 
-它首先：
+TODO：由负责人结合实际宏和底层函数完成分析。
 
-```text
-读取当前中断状态
-```
-
-然后：
+建议结合：
 
 ```text
-如果原本开启
-    ↓
-关闭中断
+sstatus
+SSTATUS_SIE
+__intr_save()
+__intr_restore()
+intr_disable()
+intr_enable()
 ```
 
-并保存之前的状态。
-
-之后：
-
-```text
-local_intr_restore()
-```
-
-根据之前保存的状态决定是否重新开启中断。
+分析。
 
 ---
 
-## 6.11 为什么不能简单 intr_disable() + intr_enable()
+## 7.7 实现中遇到的问题
 
-假设进入临界区前：
-
-```text
-中断本来就是关闭的
-```
-
-如果直接：
-
-```c
-intr_disable();
-
-/* ... */
-
-intr_enable();
-```
-
-离开临界区时就会错误地把原本关闭的中断重新打开。
-
-因此正确做法是：
-
-```text
-记住原状态
-    ↓
-关闭中断
-    ↓
-执行临界区
-    ↓
-恢复原状态
-```
-
-而不是：
-
-```text
-无条件关闭
-    ↓
-无条件打开
-```
+TODO：根据本人实际开发过程填写。
 
 ---
 
-## 6.12 拓展练习：调度中的临界区
-
-调度过程中最重要的共享状态之一是：
-
-```text
-current
-```
-
-除此之外还有：
-
-```text
-进程链表
-进程状态
-need_resched
-Context
-页表
-```
-
-这些状态在切换过程中必须保持一致。
-
-因此：
-
-```text
-local_intr_save()
-      ↓
-禁止当前 CPU 被中断打断
-      ↓
-完成关键状态修改
-      ↓
-switch_to()
-      ↓
-local_intr_restore()
-```
-
-保证切换过程不会被异步中断破坏。
-
----
-
-## 6.13 测试与验证
-
-TODO
+## 7.8 测试与验证
 
 ```bash
 make
 make qemu
 ```
 
-测试结果：
+实际结果：
 
 ```text
 TODO
 ```
 
----
-
-# 七、Lab4 整体运行流程
-
-完成三个 Function 后，可以从系统启动角度重新理解 Lab4。
-
-```text
-OpenSBI
-    ↓
-kern_entry
-    ↓
-kern_init()
-    ↓
-物理内存初始化
-    ↓
-虚拟内存初始化
-    ↓
-Trap 初始化
-    ↓
-进程系统初始化
-    ↓
-proc_init()
-    ↓
-建立 idleproc
-    ↓
-kernel_thread()
-    ↓
-创建 initproc
-    ↓
-idleproc 运行
-    ↓
-schedule()
-    ↓
-选择 initproc
-    ↓
-proc_run()
-    ↓
-switch_to()
-    ↓
-initproc 第一次运行
-```
-
-Lab4 的关键就在于：
-
-> 让内核从“只有一条固定执行流”发展为“能够管理多个独立执行实体，并在它们之间进行切换”。
+不要填写未实际执行的结果。
 
 ---
 
-# 八、关键数据结构总结
+# 八、三个 Function 的关系
 
-## 8.1 struct Page
+三个 Function 最终共同组成 Lab4 的进程管理框架。
 
-表示一个物理页。
-
-重点字段与操作：
-
-```text
-ref
-flags
-page_link
-```
-
-主要用于：
-
-```text
-物理页面管理
-引用计数
-空闲链表管理
-```
-
----
-
-## 8.2 页表项 PTE
-
-页表项负责建立：
-
-```text
-虚拟页
-    ↓
-物理页
-```
-
-之间的映射。
-
-同时记录访问权限。
-
----
-
-## 8.3 proc_struct
-
-对应操作系统理论中的：
-
-```text
-PCB
-```
-
-保存一个进程的：
-
-```text
-状态
-PID
-内核栈
-内存空间
-上下文
-TrapFrame
-调度信息
-父进程关系
-```
-
----
-
-## 8.4 context
-
-用于进程上下文切换。
-
-保存：
-
-```text
-ra
-sp
-s0 ~ s11
-```
-
-等需要保留的寄存器。
-
----
-
-## 8.5 trapframe
-
-用于保存发生 Trap 时的完整 CPU 状态。
-
-同时也可以被用于：
-
-> 人为构造新线程第一次运行时的执行现场。
-
-这是 Lab3 和 Lab4 之间非常重要的连接。
-
----
-
-# 九、进程状态
-
-本实验中主要涉及：
-
-```text
-PROC_UNINIT
-PROC_SLEEPING
-PROC_RUNNABLE
-PROC_ZOMBIE
-```
-
-其中 Lab4 最关键的是：
-
-```text
-PROC_UNINIT
-      ↓
-创建完成
-      ↓
-PROC_RUNNABLE
-      ↓
-被 schedule 选中
-      ↓
-运行
-```
-
-后续实验还会继续完善：
-
-```text
-睡眠
-退出
-等待
-回收
-```
-
-等生命周期状态。
-
----
-
-# 十、三个 Function 之间的关系
-
-本实验三个部分看似独立，实际上组成了一条完整链路。
+目前可以简单表示为：
 
 ```text
 Function 1
-内存和页面映射
-      ↓
-为进程提供正确的地址转换基础
+页面映射管理
+    ↓
+为后续进程管理提供内存基础
 
 Function 2
-进程创建
-      ↓
-建立 PCB、内核栈和执行上下文
+进程 / 内核线程创建
+    ↓
+TODO：负责人完成后补充
 
 Function 3
-调度和上下文切换
-      ↓
-让进程真正获得 CPU
+调度与上下文切换
+    ↓
+TODO：负责人完成后补充
 ```
 
-最终形成：
-
-```text
-内存资源
-    ↓
-创建进程
-    ↓
-建立执行现场
-    ↓
-进入可运行状态
-    ↓
-调度
-    ↓
-上下文切换
-    ↓
-运行
-```
+完整关系等待三个 Function 全部实现并运行验证后再补充。
 
 ---
 
-# 十一、实验测试
+# 九、实验测试
 
-## 11.1 编译测试
+## 9.1 编译测试
+
+最终合并后执行：
 
 ```bash
 cd ~/os-lab/nku-os/code
-
 make clean
 make
 ```
@@ -1668,12 +906,14 @@ make
 结果：
 
 ```text
-TODO
+TODO：三人代码合并后填写
 ```
 
 ---
 
-## 11.2 QEMU 运行测试
+## 9.2 QEMU 测试
+
+执行：
 
 ```bash
 make qemu
@@ -1682,16 +922,16 @@ make qemu
 结果：
 
 ```text
-TODO
+TODO：三人代码合并后填写
 ```
 
 ---
 
-## 11.3 官方测试
+## 9.3 官方测试
 
 按照实验指导书执行对应测试。
 
-```bash
+```text
 TODO
 ```
 
@@ -1703,7 +943,7 @@ TODO
 
 ---
 
-## 11.4 Git 修改检查
+## 9.4 Git 修改检查
 
 ```bash
 git status
@@ -1723,326 +963,278 @@ git diff
 
 ---
 
-# 十二、实验结果
+# 十、实验结果
 
-## Function 1
+## 10.1 Function 1
 
-TODO
+已在 `code/kern/mm/pmm.c` 完成：
 
-应包括：
+```text
+page_remove_pte()
+page_remove()
+page_insert()
+```
+
+实现能够处理：
+
+```text
+无原映射
+同一页面重映射
+不同页面替换
+```
+
+并正确维护：
+
+```text
+物理页引用计数
+旧映射删除
+物理页释放
+PTE 更新
+TLB 刷新
+```
+
+Function 1 当前已经完成源码编译验证。
+
+`page_insert()` 和 `page_remove()` 已不再产生链接错误。
+
+完整 QEMU 测试等待 Function 2 / Function 3 完成后统一进行。
+
+---
+
+## 10.2 Function 2
+
+**负责人：2413581-黄奕浩**
+
+TODO：负责人完成后填写本人实际结果。
+
+---
+
+## 10.3 Function 3
+
+**负责人：2411302-王乐之**
+
+TODO：负责人完成后填写本人实际结果。
+
+---
+
+## 10.4 整体运行结果
+
+TODO：三人代码整合并完成 QEMU 测试后统一填写。
+
+---
+
+# 十一、实验中遇到的问题及解决方法
+
+## 问题一：Lab4 依赖 Lab2 / Lab3 代码
+
+现象：
+
+```text
+Lab4 初始代码中存在多个 lab2 / lab3 占位位置，
+部分前序实验函数没有实现，导致当前实验无法正常编译。
+```
+
+解决：
+
+首先扫描所有：
+
+```text
+lab2
+lab3
+```
+
+注释位置。
+
+然后从对应 Lab2 / Lab3 分支读取已经完成的实现，并迁移到 Lab4。
+
+最终共恢复：
+
+```text
+page_init()
+物理页分配器
+interrupt_handler()
+exception_handler()
+RESTORE_ALL
+__alltraps
+```
+
+恢复后这些前序依赖代码均可以正常编译。
+
+---
+
+## 问题二：Function 1 完成后仍无法完整链接
+
+现象：
+
+完成：
 
 ```text
 page_insert()
 page_remove()
-页引用计数
-TLB 刷新
-测试结果
 ```
 
-## Function 2
-
-TODO
-
-应包括：
+之后执行 `make`，Function 1 已经不再出现 undefined reference，但仍然存在：
 
 ```text
-proc_struct 初始化
-do_fork()
-copy_thread()
-内核线程创建
-测试结果
+proc_init
+cpu_idle
 ```
 
-## Function 3
-
-TODO
-
-应包括：
-
-```text
-schedule()
-proc_run()
-switch_to()
-上下文切换
-测试结果
-```
-
-## 整体运行结果
-
-TODO
-
----
-
-# 十三、实验中遇到的问题及解决方法
-
-## 问题一
-
-现象：
-
-```text
-TODO
-```
+未定义。
 
 原因：
 
-```text
-TODO
-```
+这两个函数属于其他成员负责的 Lab4 Function，当前尚未实现。
+
+因此没有为了强行通过链接而修改其他成员代码。
 
 解决：
 
-```text
-TODO
-```
+等待 Function 2 / Function 3 完成后再进行完整整合和测试。
 
 ---
 
-## 问题二
+## 其他问题
 
-现象：
-
-```text
-TODO
-```
-
-原因：
-
-```text
-TODO
-```
-
-解决：
-
-```text
-TODO
-```
+TODO：由各成员根据实际开发过程继续补充。
 
 ---
 
-## 问题三
+# 十二、重要知识点总结
 
-现象：
+## 12.1 页面映射不仅是修改一个 PTE
 
-```text
-TODO
-```
-
-原因：
+`page_insert()` 和 `page_remove()` 除了修改页表项，还需要同时处理：
 
 ```text
-TODO
-```
-
-解决：
-
-```text
-TODO
-```
-
----
-
-# 十四、实验重要知识点总结
-
-## 14.1 页表映射不仅是写一个 PTE
-
-建立一个页面映射时，还需要同时处理：
-
-```text
-页表项
 页面引用计数
-原有映射
+旧映射
 页面释放
 TLB
 ```
 
-因此 `page_insert()` 和 `page_remove()` 实际体现的是一套完整的页面映射生命周期管理。
+因此页面映射实际上是一套完整的资源管理过程。
 
 ---
 
-## 14.2 PCB 是操作系统管理进程的核心
+## 12.2 get_pte() 的 create 参数
 
-操作系统不能直接管理一个抽象的“程序”。
-
-它需要将进程运行相关信息保存在：
-
-```text
-proc_struct
+```c
+get_pte(pgdir, la, 0);
 ```
 
-中。
-
-因此：
+表示：
 
 ```text
-进程
-    ↓
-在内核中的表示
-    ↓
-PCB / proc_struct
+只查询，不创建页表
 ```
+
+适合删除映射。
+
+而：
+
+```c
+get_pte(pgdir, la, 1);
+```
+
+表示：
+
+```text
+必要时分配页表
+```
+
+适合建立新的页面映射。
 
 ---
 
-## 14.3 创建进程和运行进程是两个不同阶段
+## 12.3 页面引用计数
 
-创建阶段：
+一个物理页可能被多个虚拟地址引用。
 
-```text
-分配 PCB
-分配内核栈
-建立内存信息
-建立 Context
-建立 TrapFrame
-```
+因此不能在删除一个映射时直接释放物理页。
 
-运行阶段：
+必须：
 
 ```text
-schedule
-proc_run
-switch_to
-```
-
-因此：
-
-```text
-do_fork()
+page_ref_dec()
     ↓
-只是创建完成
-
-schedule()
+判断引用计数
     ↓
-决定什么时候真正运行
+ref == 0
+    ↓
+free_page()
 ```
+
+这样才能避免仍被其他映射使用的页面被提前释放。
 
 ---
 
-## 14.4 Context 和 TrapFrame 作用不同
+## 12.4 TLB 与页表一致性
+
+修改页表后，如果 TLB 中还缓存旧的地址转换结果，则 CPU 仍可能继续使用旧映射。
+
+因此修改映射后需要：
+
+```c
+tlb_invalidate(pgdir, la);
+```
+
+保持 TLB 与页表状态一致。
+
+---
+
+## 12.5 Function 2 / Function 3
+
+TODO：对应成员根据本人实现补充。
+
+---
+
+# 十三、Lab2、Lab3 与 Lab4 的联系
+
+Lab4 并不是完全独立的实验。
+
+Function 1 可以直接看到 Lab2 中：
 
 ```text
-Context
-    ↓
-进程切换
+Page
+PTE
+页表
+物理页分配
+```
 
+等机制继续被使用。
+
+同时 Lab4 后续进程管理还会继续使用 Lab3 中已经建立的：
+
+```text
 TrapFrame
-    ↓
-Trap 保存 / 恢复
+Trap 入口
+中断控制
 ```
 
-但对于新进程第一次运行，两者会配合工作。
+等机制。
+
+因此 Lab4 是前面实验功能进一步组合的阶段。
+
+其他具体联系等待 Function 2 / Function 3 完成后由对应成员继续补充。
 
 ---
 
-## 14.5 调度和上下文切换不是同一个概念
+# 十四、实验总结
 
-调度：
+当前已经完成 Lab4 前置 Lab2 / Lab3 依赖的恢复，并完成本人负责的 Function 1 页面映射功能。
 
-```text
-选择谁运行
-```
-
-上下文切换：
+Function 1 中主要实现：
 
 ```text
-真正把 CPU 从一个进程切到另一个进程
+page_insert()
+page_remove()
 ```
 
-因此：
+完成了页面映射建立、替换、删除、引用计数维护以及 TLB 刷新。
 
-```text
-schedule()
-    ↓
-proc_run()
-    ↓
-switch_to()
-```
+同时通过分析 Sv32、Sv39 和 Sv48，进一步理解了 RISC-V 多级页表结构，以及 `get_pte()` 中多级页表遍历代码相似的原因。
 
-是三个不同层次。
+Function 2 和 Function 3 将由对应成员根据实际代码实现继续补充。
 
----
-
-## 14.6 local_intr_save / restore 保存的是“原来的状态”
-
-它们并不是单纯地：
-
-```text
-关中断
-开中断
-```
-
-而是：
-
-```text
-保存原中断状态
-    ↓
-关闭中断
-    ↓
-执行临界区
-    ↓
-恢复之前的中断状态
-```
-
-这样可以正确支持嵌套的临界区。
-
----
-
-# 十五、Lab2、Lab3 与 Lab4 的联系
-
-Lab4 中可以明显看到之前实验的机制重新被使用。
-
-```text
-Lab2
-Page / PTE / 页表
-    ↓
-Lab4 Function 1 页面映射
-
-Lab3
-TrapFrame / 中断保护
-    ↓
-Lab4 新线程首次运行
-    ↓
-Lab4 调度临界区
-
-Lab4
-proc_struct / schedule / switch_to
-    ↓
-形成真正的多执行流内核
-```
-
-因此 Lab4 是前几个实验第一次明显汇合的阶段。
-
----
-
-# 十六、实验总结
-
-本实验在前面物理内存、虚拟内存以及 Trap 机制的基础上，实现了基本的进程管理框架。
-
-实验首先进一步完善页面映射相关操作，通过 `page_insert()` 和 `page_remove()` 管理虚拟地址和物理页面之间的映射关系。
-
-随后通过 `proc_struct`、`do_fork()`、`copy_thread()` 等机制建立新的进程或内核线程，并为新进程分配内核栈、构造执行上下文，使其具备被调度运行的条件。
-
-最后通过 `schedule()`、`proc_run()` 和 `switch_to()` 完成进程选择和上下文切换，使 CPU 能够在不同执行实体之间切换。
-
-整个 Lab4 的核心过程可以概括为：
-
-```text
-页面与地址空间
-      ↓
-建立 PCB
-      ↓
-创建进程
-      ↓
-建立 Context / TrapFrame
-      ↓
-PROC_RUNNABLE
-      ↓
-schedule()
-      ↓
-proc_run()
-      ↓
-switch_to()
-      ↓
-进程运行
-```
-
-通过本实验，可以更加直观地理解课堂中进程控制块、进程创建、调度、上下文切换、临界区和中断保护等概念如何真正落实到操作系统内核代码中。
+待三个部分全部完成后，再统一进行完整编译、QEMU 运行、官方测试以及最终实验总结。
