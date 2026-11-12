@@ -4,10 +4,10 @@
 
 | 项目 | 内容 |
 |---|---|
-| 实验名称 | Lab3：中断与异常处理 |
+| 实验名称 | Lab4：进程管理 |
 | 小组成员 | 2412771-谭锦睿、2413581-黄奕浩、2411302-王乐之 |
-| 完成日期 | 2026-11-06 |
-| 实验分支 | `lab3` |
+| 完成日期 | 2026-11-XX |
+| 实验分支 | `lab4` |
 | 代码目录 | `code/` |
 | 报告目录 | `report/` |
 
@@ -19,48 +19,69 @@
 
 | 成员 | 负责内容 |
 |---|---|
-| 2412771-谭锦睿 | 功能一：Trap 入口与上下文恢复。负责 `trapentry.S` 中 `RESTORE_ALL` 和 `__alltraps` 的实现及相关代码分析。 |
-| 2413581-黄奕浩 | 功能二：中断处理。负责 `trap.c` 中 `interrupt_handler()` 的实现，包括时钟中断及其他中断处理。 |
-| 2411302-王乐之 | 功能二：异常处理。负责 `trap.c` 中 `exception_handler()` 的实现，包括断点异常、非法指令异常及其他异常处理。 |
-| 三人共同完成 | 最终代码整合、编译运行、实验测试和报告整理。 |
+| 2412771-谭锦睿 | Function 1：页面映射相关操作。负责 `page_insert()`、`page_remove()` 及其相关页表、页引用计数、TLB 刷新逻辑的实现和分析。 |
+| 2413581-黄奕浩 | Function 2：进程 / 内核线程创建。负责进程控制块初始化、内核栈分配、`do_fork()`、`copy_thread()` 等进程创建相关代码的实现和分析。 |
+| 2411302-王乐之 | Function 3：进程调度与上下文切换。负责 `schedule()`、`proc_run()`、`switch_to()` 以及相关调度和上下文保存恢复逻辑的实现和分析。 |
+| 三人共同完成 | 最终代码整合、编译运行、QEMU 测试、官方测试以及实验报告整理。 |
+
+### 拓展练习分工
+
+| 成员 | 拓展练习 |
+|---|---|
+| 2412771-谭锦睿 | Challenge 2：深入理解不同分页模式的工作原理。结合 Sv32、Sv39、Sv48 的区别，分析 `get_pte()` 中两段形式相似代码的原因；讨论当前 `get_pte()` 将页表项查找和页表页分配合并在一个函数中的设计是否合理，以及是否有必要拆分。 |
+| 2411302-王乐之 | Challenge 1：说明 `local_intr_save(intr_flag); ... local_intr_restore(intr_flag);` 如何实现中断状态的保存、关闭和恢复。 |
+| 2413581-黄奕浩 | 无单独 Challenge，负责 Function 2：进程 / 内核线程创建部分及对应实验报告。 |
 
 ### 任务完成情况
 
-- [x] 功能一：Trap 入口与上下文恢复
-- [x] 功能二：中断处理
-- [x] 功能二：异常处理
-- [x] 完成实验代码整合
-- [x] 完成编译与运行验证
-- [x] 完成实验报告
-- [x] 整理实际使用的 Prompt
+- [ ] Function 1：完成 `page_insert()` / `page_remove()`
+- [ ] Function 2：完成进程 / 内核线程创建相关功能
+- [ ] Function 3：完成调度与上下文切换
+- [ ] 完成三个 Function 的代码整合
+- [ ] 完成编译
+- [ ] 完成 QEMU 运行验证
+- [ ] 完成官方测试
+- [ ] 完成拓展练习分析
+- [ ] 完成实验报告
+- [ ] 整理实际使用的 Prompt
 
 ### 报告分工
 
 | 成员 | 报告负责内容 |
 |---|---|
-| 2412771-谭锦睿 | Trap 入口、上下文保存与恢复 |
-| 2413581-黄奕浩 | 中断处理部分 |
-| 2411302-王乐之 | 异常处理部分 |
-| 三人共同完成 | 实验结果、测试记录和最终报告整理 |
+| 2412771-谭锦睿 | 页面映射、`page_insert()`、`page_remove()` 以及页表相关拓展练习 |
+| 2413581-黄奕浩 | 进程控制块、进程创建、`do_fork()`、`copy_thread()` 及新线程首次运行流程 |
+| 2411302-王乐之 | `schedule()`、`proc_run()`、`switch_to()`、中断保护及上下文切换 |
+| 三人共同完成 | 整体流程分析、实验结果、测试记录、问题分析和最终报告整理 |
 
-实际使用的 Prompt 统一整理在 `report/prompt.md`。
+实际使用的 Prompt 统一整理在：
+
+```text
+report/prompt.md
+```
 
 ---
 
 # 一、实验目的
 
-本实验主要学习 RISC-V 架构下的中断与异常处理机制，理解处理器发生 Trap 后进入操作系统内核、保存现场、分类处理并恢复执行的完整过程，并完成基本的中断和异常处理功能。
+本实验主要学习操作系统中的进程管理机制，在前面实验已经实现的物理内存管理、页表和 Trap 机制基础上，进一步加入内核线程、进程控制块、调度以及上下文切换等功能。
+
+通过本实验，需要理解操作系统如何表示一个进程、如何创建新的执行实体、如何保存和恢复进程执行状态，以及如何通过调度机制让不同进程共享 CPU。
 
 主要目标如下：
 
-1. 理解 Trap、Interrupt 和 Exception 的基本概念及其关系；
-2. 理解 RISC-V 中与 Trap 处理有关的控制状态寄存器；
-3. 理解 Trap 发生后处理器进入 Trap 处理程序的基本流程；
-4. 理解 TrapFrame 及寄存器现场保存与恢复过程；
-5. 完成 Trap 入口和上下文恢复代码；
-6. 完成中断处理代码；
-7. 完成异常处理代码；
-8. 通过编译、QEMU 运行和实验测试验证实现结果。
+1. 理解进程和内核线程的基本概念；
+2. 理解 `proc_struct` 进程控制块的结构和作用；
+3. 理解页面映射建立、替换和删除的过程；
+4. 理解物理页引用计数的作用；
+5. 理解 `do_fork()` 创建新进程的整体流程；
+6. 理解 `copy_thread()` 如何构造新线程第一次运行所需的执行现场；
+7. 理解进程从创建到进入可运行状态的过程；
+8. 理解 `schedule()` 的基本调度过程；
+9. 理解 `proc_run()` 和 `switch_to()` 的作用；
+10. 理解上下文切换过程中寄存器保存与恢复机制；
+11. 理解调度过程中关闭和恢复中断的原因；
+12. 通过编译、QEMU 运行以及测试验证实验实现。
 
 ---
 
@@ -77,15 +98,15 @@
 | 固件 | OpenSBI |
 | 调试工具 | RISC-V GDB |
 | 版本管理 | Git |
-| 实验分支 | `lab3` |
+| 实验分支 | `lab4` |
 
 ## 2.2 AI 工具
 
 | 成员 | AI 工具 | 用途 |
 |---|---|---|
-| 2412771-谭锦睿 | ChatGPT / Codex | 实验要求分析、代码理解、实现与检查辅助 |
-| 2413581-黄奕浩 | ChatGPT / Codex | 中断处理实现与检查 |
-| 2411302-王乐之 | ChatGPT / Codex | 异常处理实现与检查 |
+| 2412771-谭锦睿 | ChatGPT / Codex | 实验要求分析、页表和页面映射代码理解、实现与检查 |
+| 2413581-黄奕浩 | ChatGPT / Codex | 进程创建代码理解、实现与调用关系分析 |
+| 2411302-王乐之 | ChatGPT / Codex | 调度、上下文切换代码理解与检查 |
 
 完整 Prompt 见：
 
@@ -97,687 +118,1931 @@ report/prompt.md
 
 # 三、实验整体逻辑分析
 
-## 3.1 Lab3 主要内容
+## 3.1 Lab4 与前面实验的关系
 
-本实验在前面实验的基础上加入 RISC-V Trap 处理机制。主要实现文件为：
+Lab4 并不是从头建立一个新的子系统，而是在前面实验提供的机制上继续加入进程管理。
 
-```text
-kern/trap/trapentry.S
-kern/trap/trap.c
-```
-
-其中：
+整体关系可以表示为：
 
 ```text
-trapentry.S
-    ├── SAVE_ALL
-    ├── RESTORE_ALL
-    ├── __alltraps
-    └── __trapret
-
-trap.c
-    ├── idt_init()
-    ├── trap()
-    ├── trap_dispatch()
-    ├── interrupt_handler()
-    └── exception_handler()
+Lab1
+最小可执行内核
+    ↓
+Lab2
+物理内存管理 + 页表
+    ↓
+Lab3
+Trap + 中断 + 异常
+    ↓
+Lab4
+进程管理 + 调度 + 上下文切换
 ```
 
-此外，时钟中断还会使用 `kern/driver/clock.c` 中的 `clock_init()`、`clock_set_next_event()` 和 `ticks`，中断开关则与 `kern/driver/intr.c`、`kern/sync/sync.h` 中的相关接口有关。
-
-## 3.2 Trap 处理总体流程
-
-系统初始化时，`idt_init()` 将 `stvec` 设置为 `__alltraps`，`clock_init()` 打开时钟中断源并设置第一次时钟事件，之后由全局中断开关允许 S 态中断响应。
-
-发生 Trap 后，处理器先更新 `sepc`、`scause`、`sstatus` 等 CSR，并跳转到 `stvec` 指向的 `__alltraps`。汇编入口通过 `SAVE_ALL` 将通用寄存器和关键 CSR 保存到栈上的 TrapFrame，再将 TrapFrame 指针传给 C 层的 `trap()`。
-
-完整流程如下：
+Lab4 中的进程管理需要同时依赖：
 
 ```text
-初始化
-    ↓
-stvec = __alltraps
-    ↓
-发生 Trap
-    ↓
-CPU 更新 sepc / scause / sstatus 等 CSR
-    ↓
-__alltraps
-    ↓
-SAVE_ALL
-    ↓
-构造 TrapFrame
-    ↓
-trap(tf)
-    ↓
-trap_dispatch(tf)
-    ↓
-┌───────────────┬───────────────┐
-│ Interrupt     │ Exception     │
-│       ↓       │       ↓       │
-│ interrupt_    │ exception_    │
-│ handler()     │ handler()     │
-└───────────────┴───────────────┘
-    ↓
-__trapret
-    ↓
-RESTORE_ALL
-    ↓
-sret
-    ↓
-恢复原执行流程
+物理内存管理
+      +
+虚拟内存与页表
+      +
+Trap 机制
+      +
+内核栈
+      +
+进程上下文
+      +
+调度机制
 ```
 
-中断和异常共用同一套入口与返回机制，区别主要体现在 `trap_dispatch()` 之后的具体处理策略。
+因此 Lab4 将前面较为独立的内核机制进一步组合起来。
 
 ---
 
-# 四、实验内容与实现
+## 3.2 Lab4 主要内容
 
-## 4.1 功能一：Trap 入口与上下文恢复
+本实验可以大致分为三个部分：
+
+```text
+Function 1
+页面映射管理
+page_insert / page_remove
+
+        ↓
+
+Function 2
+进程和内核线程创建
+do_fork / copy_thread
+
+        ↓
+
+Function 3
+调度和上下文切换
+schedule / proc_run / switch_to
+```
+
+三部分之间并不是完全独立的。
+
+新的进程首先需要正确的内存管理和运行环境，然后由进程创建函数建立 PCB、内核栈以及执行上下文，最后进入可运行状态，由调度器决定什么时候真正获得 CPU。
+
+---
+
+## 3.3 从创建到运行的整体流程
+
+一个新线程并不是创建之后立即开始执行。
+
+大致流程为：
+
+```text
+创建线程请求
+    ↓
+do_fork()
+    ↓
+分配并初始化 proc_struct
+    ↓
+分配内核栈
+    ↓
+建立内存管理信息
+    ↓
+copy_thread()
+    ↓
+建立 TrapFrame 和 Context
+    ↓
+分配 PID
+    ↓
+加入进程管理结构
+    ↓
+设置为 PROC_RUNNABLE
+    ↓
+等待调度
+    ↓
+schedule()
+    ↓
+proc_run()
+    ↓
+switch_to()
+    ↓
+新线程第一次获得 CPU
+```
+
+因此：
+
+```text
+创建进程 ≠ 进程已经运行
+```
+
+创建阶段只是使进程具备能够被操作系统调度的条件。
+
+---
+
+# 四、Function 1：页面映射管理
 
 **负责人：2412771-谭锦睿**
 
-### 4.1.1 任务要求
+## 4.1 任务要求
 
-本任务主要涉及：
+本部分主要完成页面映射相关操作，重点分析：
 
-```text
-kern/trap/trapentry.S
+```c
+page_insert()
+page_remove()
 ```
 
-需要完成：
-
-```text
-RESTORE_ALL
-__alltraps
-```
-
-现有框架已经提供 `SAVE_ALL`、`__trapret` 和 `sret` 等基本结构，本任务在此基础上完成上下文恢复以及汇编入口到 C 语言 Trap 处理函数的衔接。
-
-### 4.1.2 主要涉及文件
-
-```text
-kern/trap/trapentry.S
-kern/trap/trap.h
-kern/trap/trap.c
-```
-
-### 4.1.3 实现过程
-
-框架中的 `SAVE_ALL` 在 Trap 发生后先将原来的 `sp` 暂存到 `sscratch`，随后在栈上分配 `36 * REGBYTES` 的空间保存 TrapFrame。当前实验为 RV64，`REGBYTES = 8`，因此 TrapFrame 共占 288 字节。
-
-前 32 个槽位对应 `x0 ~ x31`，其中第 2 个槽位保存 Trap 前的原 `sp`；后四个槽位分别保存 `sstatus`、`sepc`、`sbadaddr` 和 `scause`。
-
-`RESTORE_ALL` 按照 `SAVE_ALL` 的布局进行反向恢复。首先恢复 Trap 返回所需的 `sstatus` 和 `sepc`，随后恢复通用寄存器。`x0` 在 RISC-V 中恒为 0，因此不需要恢复；`sp` 必须最后恢复，因为此前所有寄存器仍需要以当前 `sp` 作为 TrapFrame 的访问基址。
-
-`__alltraps` 中首先执行框架已有的 `SAVE_ALL`。此时 `sp` 指向当前 TrapFrame，根据 RISC-V ABI，将 `sp` 放入参数寄存器 `a0`，再通过 `jal trap` 调用 C 层的 `trap(struct trapframe *tf)`。
-
-`trap()` 返回后，程序顺序进入 `__trapret`，执行 `RESTORE_ALL`，最后由 `sret` 完成 Trap 返回。
-
-### 4.1.4 关键代码
-
-恢复 `sstatus` 和 `sepc`：
-
-```asm
-LOAD s1, 32*REGBYTES(sp)
-LOAD s2, 33*REGBYTES(sp)
-csrw sstatus, s1
-csrw sepc, s2
-```
-
-恢复通用寄存器，并最后恢复 `sp`：
-
-```asm
-LOAD x1, 1*REGBYTES(sp)
-LOAD x3, 3*REGBYTES(sp)
-...
-LOAD x31, 31*REGBYTES(sp)
-LOAD x2, 2*REGBYTES(sp)
-```
-
-Trap 入口：
-
-```asm
-__alltraps:
-    SAVE_ALL
-
-    #lab3 function1 2412771
-    move a0, sp
-    jal trap
-```
-
-### 4.1.5 Prompt
-
-完整 Prompt 见 `report/prompt.md`。本部分使用的核心约束为：
-
-```text
-[PROMPT]
-完成 trapentry.S 中 RESTORE_ALL 和 __alltraps 的 Lab3 实现。
-
-[RELY]
-以现有 SAVE_ALL、TrapFrame 布局、trap()、RISC-V ABI 以及
-REGBYTES/LOAD/STORE 定义为依据。
-
-[GUARANTEE]
-只修改本功能要求的位置，不修改 SAVE_ALL、__trapret、
-测试代码及其他成员负责的中断和异常处理函数。
-
-[SPECIFICATION]
-按照 TrapFrame 布局恢复 sstatus、sepc 和通用寄存器，
-sp 最后恢复；__alltraps 中将当前 TrapFrame 地址通过 a0
-传给 trap()。
-```
-
-### 4.1.6 测试与验证
-
-首先检查修改范围：
-
-```bash
-git diff --check
-git diff --name-only
-```
-
-检查结果表明 `trapentry.S` 修改符合格式要求，且未修改其他成员负责的代码。
-
-随后单独编译 Trap 入口汇编文件：
-
-```bash
-cd ~/os-lab/nku-os/code
-make obj/kern/trap/trapentry.o V=
-```
-
-目标文件能够正常生成。进一步结合反汇编和最终整体测试确认：
-
-- `a0` 被设置为当前 TrapFrame 地址；
-- 能够正确调用 `trap()`；
-- `sstatus` 和 `sepc` 能够正确写回；
-- 通用寄存器按照 TrapFrame 布局恢复；
-- `sp` 最后恢复；
-- 返回流程最终执行 `sret`。
-
-功能一最终随小组代码一起完成整体联调，并通过官方 Trap 入口与寄存器恢复测试。
+需要理解一个物理页如何被插入到指定虚拟地址的页表映射中，以及删除映射时引用计数、页表项和 TLB 应如何处理。
 
 ---
 
-## 4.2 功能二：中断处理
-
-**负责人：2413581-黄奕浩**
-
-### 4.2.1 任务要求
-
-实现：
-
-```c
-void interrupt_handler(struct trapframe *tf);
-```
-
-函数位于：
-
-```text
-kern/trap/trap.c
-```
-
-`trap_dispatch()` 已经根据 `scause` 最高位将中断和异常分开，因此 `interrupt_handler()` 主要负责进一步识别具体的中断类型并完成对应处理。
-
-时钟中断需要重新设置下一次事件、更新 `ticks`，并按照实验要求周期性打印；达到设定次数后通过 SBI 结束运行。其他已知中断输出相应提示，未知中断打印原因号及 TrapFrame。
-
-### 4.2.2 主要涉及文件和调用关系
+## 4.2 主要涉及文件
 
 主要涉及：
 
 ```text
-kern/trap/trap.c
-kern/trap/trap.h
-kern/driver/clock.c
+kern/mm/pmm.c
+kern/mm/pmm.h
 libs/riscv.h
-libs/sbi.h
 ```
 
-调用关系为：
-
-```text
-__alltraps
-    ↓
-SAVE_ALL
-    ↓
-trap(tf)
-    ↓
-trap_dispatch(tf)
-    ↓
-interrupt_handler(tf)
-    ↓
-__trapret
-    ↓
-RESTORE_ALL
-    ↓
-sret
-```
-
-### 4.2.3 实现过程
-
-RV64 的 `scause` 最高位用于表示当前 Trap 是否为中断。进入 `interrupt_handler()` 时已经确定当前为 Interrupt，因此首先清除最高位，只保留具体中断编号：
-
-```c
-uintptr_t cause = tf->cause & ~((uintptr_t)1 << 63);
-```
-
-随后通过 `switch` 处理不同中断。
-
-本实验最主要的是 Supervisor Timer Interrupt。处理 `IRQ_S_TIMER` 时，首先调用 `clock_set_next_event()` 重新设置下一次时钟事件，再执行 `ticks++` 记录中断次数。
-
-`clock_set_next_event()` 位于 `kern/driver/clock.c`，内部通过 `sbi_set_timer(get_time() + timebase)` 设置未来的定时器事件。该定时器需要在每次时钟中断后重新设置，否则后续时钟中断不会持续产生。
-
-本实现沿用 `TICK_NUM = 100`，并设置 `SHUTDOWN_AFTER = 10`。因此每累计 100 次时钟中断打印一次，共打印 10 次后调用 `sbi_shutdown()`。
-
-其他软件中断、定时器中断和外部中断按照原因号输出对应提示；未知中断输出原因号并调用 `print_trapframe(tf)` 打印现场，便于定位问题。
-
-### 4.2.4 关键代码
-
-```c
-#define TICK_NUM 100
-#define SHUTDOWN_AFTER 10
-```
-
-清除 `scause` 的中断标志位：
-
-```c
-uintptr_t cause = tf->cause & ~((uintptr_t)1 << 63);
-```
-
-时钟中断处理：
-
-```c
-case IRQ_S_TIMER:
-    clock_set_next_event();
-    ticks++;
-
-    if (ticks % TICK_NUM == 0) {
-        print_ticks();
-
-        if (ticks / TICK_NUM >= SHUTDOWN_AFTER) {
-            sbi_shutdown();
-        }
-    }
-    break;
-```
-
-未知中断处理：
-
-```c
-default:
-    cprintf("Unknown interrupt: cause %lu\n",
-            (unsigned long)cause);
-    print_trapframe(tf);
-    break;
-```
-
-### 4.2.5 Prompt
-
-完整 Prompt 见 `report/prompt.md`。本部分主要要求 AI 辅助确认中断原因编码、时钟中断处理顺序以及与现有 Trap 入口和恢复代码之间的接口关系，实际实现仍以当前工程已有接口和实验指导书为准。
-
-### 4.2.6 测试与验证
-
-首先对 `trap.c` 进行编译检查：
-
-```bash
-make obj/kern/trap/trap.o
-```
-
-编译通过。
-
-整体代码合入后，通过 QEMU 和官方测试验证了以下内容：
-
-- `IRQ_S_TIMER` 能够持续触发；
-- 每次时钟中断都会重新设置下一次事件；
-- `ticks` 能够持续增长；
-- 每 100 次时钟中断打印一次 `100 ticks`；
-- 达到设定次数后能够通过 SBI 正常结束运行；
-- 未知中断能够输出原因及 TrapFrame；
-- 中断处理不会修改异常处理所需的 `epc`。
-
-官方时钟测试结果：
-
-```text
-re-armed supervisor timer and repeated trap return:
-PASS (40/40, ticks=200)
-```
-
-运行过程中能够持续看到：
-
-```text
-++ setup timer interrupts
-100 ticks
-100 ticks
-...
-```
-
-说明时钟事件能够被持续重新设置，并能够多次完成 Trap 进入和返回。
-
-### 4.2.7 运行截图
-
-![图1：持续时钟中断与自动关机](./images/huangyihao-timer-shutdown.png)
-
-图1中可以看到时钟初始化完成后持续输出 `100 ticks`，同时官方时钟测试在 `ticks=200` 时通过。继续运行到设定阈值后，系统通过 SBI 正常退出。
-
-![图2：其他中断与未知中断处理](./images/huangyihao-interrupt-fallback.png)
-
-图2展示了不同中断类型的提示以及未知中断情况下的 TrapFrame 输出，说明中断分类和默认处理分支能够正常工作。
+具体以实验代码实际位置为准。
 
 ---
 
-## 4.3 功能二：异常处理
+## 4.3 相关基础
+
+页面映射建立过程的核心关系为：
+
+```text
+虚拟地址 la
+    ↓
+页表查询
+    ↓
+PTE
+    ↓
+物理页 Page
+```
+
+页表项不仅记录物理页地址，还包含：
+
+```text
+PTE_V
+PTE_R
+PTE_W
+PTE_X
+PTE_U
+```
+
+等权限和有效位。
+
+此外，一个物理页可能同时被多个映射引用，因此需要：
+
+```text
+page_ref(page)
+```
+
+记录当前页面被引用的次数。
+
+---
+
+## 4.4 page_insert()
+
+### 4.4.1 主要作用
+
+`page_insert()` 的作用是：
+
+> 将物理页 `page` 映射到页表 `pgdir` 中虚拟地址 `la` 对应的位置。
+
+整体过程可以概括为：
+
+```text
+page_insert()
+    ↓
+get_pte(pgdir, la, 1)
+    ↓
+找到 / 创建对应 PTE
+    ↓
+增加新页面引用计数
+    ↓
+检查原映射
+    ↓
+必要时删除旧映射
+    ↓
+写入新的 PTE
+    ↓
+刷新 TLB
+```
+
+### 4.4.2 需要注意的问题
+
+如果该虚拟地址原本没有映射，则可以直接建立新映射。
+
+如果该地址已经映射到其他物理页，则需要先删除旧映射并正确处理旧页面的引用计数。
+
+如果原本映射的就是同一个物理页，则需要避免引用计数出现错误。
+
+TODO：完成代码后结合实际实现补充。
+
+---
+
+## 4.5 page_remove()
+
+### 4.5.1 主要作用
+
+`page_remove()` 用于删除指定虚拟地址对应的页面映射。
+
+总体过程：
+
+```text
+page_remove()
+    ↓
+get_pte()
+    ↓
+查找对应 PTE
+    ↓
+判断是否存在有效映射
+    ↓
+找到物理页
+    ↓
+减少引用计数
+    ↓
+必要时释放页面
+    ↓
+清除 PTE
+    ↓
+刷新 TLB
+```
+
+### 4.5.2 为什么需要刷新 TLB
+
+CPU 访问虚拟地址时，并不一定每次都重新查询页表，而可能直接使用 TLB 中缓存的地址转换结果。
+
+如果页表已经改变，但 TLB 中仍然保存旧映射，则可能继续访问旧物理地址。
+
+因此删除或修改页表映射后，需要进行对应的 TLB 刷新操作。
+
+---
+
+## 4.6 关键代码
+
+TODO：实现后填写。
+
+```c
+// page_insert()
+
+TODO
+```
+
+```c
+// page_remove()
+
+TODO
+```
+
+---
+
+## 4.7 Function 1 调用关系
+
+```text
+page_insert
+    ↓
+get_pte
+    ↓
+page_ref_inc
+    ↓
+page_remove_pte（必要时）
+    ↓
+写入新 PTE
+    ↓
+tlb_invalidate
+```
+
+删除过程：
+
+```text
+page_remove
+    ↓
+get_pte
+    ↓
+page_remove_pte
+    ↓
+page_ref_dec
+    ↓
+free_page（引用计数为 0）
+    ↓
+清除 PTE
+    ↓
+tlb_invalidate
+```
+
+具体以实验代码为准。
+
+---
+
+## 4.8 拓展练习一：Sv32、Sv39、Sv48 的区别
+
+RISC-V 根据不同地址宽度支持不同的页表模式。
+
+### Sv32
+
+主要用于 32 位 RISC-V。
+
+采用：
+
+```text
+两级页表
+```
+
+虚拟地址大致划分为：
+
+```text
+VPN[1] | VPN[0] | page offset
+```
+
+### Sv39
+
+RV64 中常用的分页模式。
+
+采用：
+
+```text
+三级页表
+```
+
+虚拟地址划分为：
+
+```text
+VPN[2] | VPN[1] | VPN[0] | page offset
+```
+
+每级 VPN 为 9 位，页内偏移为 12 位。
+
+因此：
+
+```text
+9 + 9 + 9 + 12 = 39 bit
+```
+
+### Sv48
+
+采用：
+
+```text
+四级页表
+```
+
+比 Sv39 再增加一级 VPN。
+
+虚拟地址结构：
+
+```text
+VPN[3] | VPN[2] | VPN[1] | VPN[0] | page offset
+```
+
+---
+
+## 4.9 拓展练习二：为什么 get_pte() 中两段代码很相似
+
+`get_pte()` 需要逐级查询多级页表。
+
+例如 Sv39 需要：
+
+```text
+一级页表
+    ↓
+二级页表
+    ↓
+三级页表
+```
+
+对于每一级中间页表，处理步骤实际上都类似：
+
+```text
+取当前页表项
+    ↓
+判断是否有效
+    ↓
+若不存在且 create = 1
+    ↓
+分配新的页表页
+    ↓
+初始化
+    ↓
+写入上一级页表项
+    ↓
+进入下一级页表
+```
+
+因此代码中处理不同级页表的两部分逻辑会高度相似。
+
+这种重复本质上来源于：
+
+> 多级页表的每一级使用相同的数据结构和类似的查询规则。
+
+---
+
+## 4.10 拓展练习三：查找和分配是否应该拆开
+
+当前 `get_pte()` 一般通过 `create` 参数同时支持：
+
+```text
+只查找
+```
+
+和：
+
+```text
+不存在时创建页表
+```
+
+优点是接口统一：
+
+```c
+get_pte(pgdir, la, 0);
+```
+
+表示只查找。
+
+```c
+get_pte(pgdir, la, 1);
+```
+
+表示必要时创建。
+
+但它也使函数同时承担：
+
+```text
+查询
++
+内存分配
++
+页表修改
+```
+
+多个职责。
+
+因此从软件设计角度，也可以拆分成类似：
+
+```text
+find_pte()
+```
+
+和：
+
+```text
+create_pte()
+```
+
+两个接口。
+
+拆分后的代码职责更加明确，但会增加接口数量和部分重复代码。
+
+本实验框架使用 `create` 参数属于一种较简洁的实现方式。
+
+---
+
+## 4.11 测试与验证
+
+TODO：Function 1 完成后填写。
+
+编译：
+
+```bash
+cd ~/os-lab/nku-os/code
+
+make
+```
+
+检查：
+
+```bash
+git diff --check
+```
+
+运行：
+
+```bash
+make qemu
+```
+
+测试结果：
+
+```text
+TODO
+```
+
+---
+
+# 五、Function 2：进程与内核线程创建
+
+**负责人：2413581-黄奕浩**
+
+## 5.1 任务要求
+
+本部分主要分析并实现进程 / 内核线程的创建过程。
+
+重点函数包括：
+
+```text
+alloc_proc()
+do_fork()
+copy_thread()
+kernel_thread()
+```
+
+需要理解操作系统如何从零建立一个能够被调度运行的新进程。
+
+---
+
+## 5.2 主要涉及文件
+
+主要涉及：
+
+```text
+kern/process/proc.c
+kern/process/proc.h
+```
+
+同时与：
+
+```text
+kern/mm/
+kern/trap/
+```
+
+中的相关数据结构存在联系。
+
+---
+
+## 5.3 proc_struct
+
+`proc_struct` 是 ucore 中用于描述一个进程的核心数据结构，相当于操作系统理论中的 PCB。
+
+主要成员包括：
+
+```text
+state
+pid
+runs
+kstack
+need_resched
+parent
+mm
+context
+tf
+cr3
+flags
+name
+list_link
+hash_link
+```
+
+---
+
+## 5.4 主要成员作用
+
+### state
+
+表示当前进程状态。
+
+例如：
+
+```text
+PROC_UNINIT
+PROC_SLEEPING
+PROC_RUNNABLE
+PROC_ZOMBIE
+```
+
+### pid
+
+进程唯一编号。
+
+### runs
+
+记录进程被调度运行的次数。
+
+### kstack
+
+该进程的内核栈地址。
+
+### need_resched
+
+表示当前进程是否需要重新调度。
+
+### parent
+
+指向父进程。
+
+### mm
+
+指向进程的内存管理结构。
+
+对于部分内核线程：
+
+```text
+mm = NULL
+```
+
+### context
+
+保存进程进行上下文切换时需要恢复的寄存器。
+
+### tf
+
+指向该进程内核栈中的 TrapFrame。
+
+### cr3
+
+保存页表相关信息。
+
+---
+
+## 5.5 alloc_proc()
+
+`alloc_proc()` 的主要作用是：
+
+> 分配一个新的 `proc_struct` 并初始化其中各字段。
+
+新申请的进程控制块最开始还不是可运行进程。
+
+整体流程：
+
+```text
+kmalloc(sizeof(struct proc_struct))
+    ↓
+初始化字段
+    ↓
+state = PROC_UNINIT
+    ↓
+pid = -1
+    ↓
+初始化 context / tf / mm 等成员
+```
+
+TODO：结合实际代码填写最终初始化值。
+
+---
+
+## 5.6 do_fork()
+
+`do_fork()` 是进程创建过程中的核心函数。
+
+总体过程可以概括为：
+
+```text
+do_fork()
+    ↓
+检查进程数量
+    ↓
+alloc_proc()
+    ↓
+建立父子关系
+    ↓
+setup_kstack()
+    ↓
+copy_mm()
+    ↓
+copy_thread()
+    ↓
+get_pid()
+    ↓
+加入进程链表 / 哈希表
+    ↓
+wakeup_proc()
+    ↓
+返回新进程 PID
+```
+
+---
+
+## 5.7 setup_kstack()
+
+每个内核线程需要独立的内核栈。
+
+因此创建进程时需要为其分配：
+
+```text
+KSTACKPAGE
+```
+
+个页面作为内核栈。
+
+内核栈主要用于：
+
+```text
+函数调用
+TrapFrame
+异常和中断处理
+内核态执行
+```
+
+---
+
+## 5.8 copy_thread()
+
+`copy_thread()` 负责构造新线程第一次被调度运行时需要的执行现场。
+
+其中需要设置：
+
+```text
+TrapFrame
+Context
+```
+
+典型关系：
+
+```text
+proc->tf
+    ↓
+新线程的 TrapFrame
+
+proc->context
+    ↓
+第一次 switch_to 后应该从哪里继续执行
+```
+
+因此 `copy_thread()` 是：
+
+> “创建一个进程”
+
+和
+
+> “这个进程以后如何第一次开始运行”
+
+之间非常关键的连接点。
+
+TODO：结合实际代码分析各寄存器设置。
+
+---
+
+## 5.9 Context 与 TrapFrame 的区别
+
+两者都保存处理器状态，但用途不同。
+
+### TrapFrame
+
+主要用于：
+
+```text
+Trap / Interrupt / Exception
+```
+
+发生时保存完整现场。
+
+来自 Lab3。
+
+### Context
+
+主要用于：
+
+```text
+进程上下文切换
+```
+
+只需要保存按照调用约定必须跨函数调用保持的寄存器以及：
+
+```text
+ra
+sp
+```
+
+等关键寄存器。
+
+因此：
+
+```text
+TrapFrame
+    ↓
+Trap 上下文
+
+Context
+    ↓
+进程调度上下文
+```
+
+---
+
+## 5.10 kernel_thread()
+
+`kernel_thread()` 用于创建一个内核线程。
+
+其核心思想不是直接调用目标函数，而是先构造一个特殊的 TrapFrame，使新进程第一次运行时进入指定的内核线程入口。
+
+流程：
+
+```text
+kernel_thread(fn, arg)
+    ↓
+构造临时 TrapFrame
+    ↓
+do_fork()
+    ↓
+copy_thread()
+    ↓
+建立新进程执行上下文
+```
+
+---
+
+## 5.11 idleproc 与 initproc
+
+系统初始化进程管理模块后，会出现两个重要进程。
+
+### idleproc
+
+`idleproc` 对应系统最初的空闲进程。
+
+它的作用主要是：
+
+```text
+当没有其他进程需要运行时
+保持 CPU 有一个合法执行主体
+```
+
+同时：
+
+```text
+current = idleproc
+```
+
+使系统从一开始就具有合法的当前进程。
+
+### initproc
+
+`initproc` 是通过内核线程创建机制建立的第一个真正的新进程。
+
+因此：
+
+```text
+idleproc
+    ↓
+系统启动时人工建立
+
+initproc
+    ↓
+通过 kernel_thread / do_fork 创建
+```
+
+---
+
+## 5.12 拓展练习：新线程第一次运行的完整链路
+
+一个新内核线程第一次开始运行的大致过程：
+
+```text
+kernel_thread()
+    ↓
+do_fork()
+    ↓
+alloc_proc()
+    ↓
+setup_kstack()
+    ↓
+copy_thread()
+    ↓
+建立 context
+    ↓
+进程进入 PROC_RUNNABLE
+    ↓
+schedule()
+    ↓
+选中新进程
+    ↓
+proc_run()
+    ↓
+switch_to()
+    ↓
+恢复新进程 context
+    ↓
+进入 forkret
+    ↓
+利用 TrapFrame 恢复执行现场
+    ↓
+进入 kernel_thread_entry
+    ↓
+执行目标函数 fn(arg)
+```
+
+这一流程说明：
+
+> 新线程第一次运行并不是直接由 `do_fork()` 调用目标函数，而是通过人为构造 Context 和 TrapFrame，使调度器第一次切换到该进程时自然进入指定入口。
+
+---
+
+## 5.13 测试与验证
+
+TODO
+
+```bash
+make
+make qemu
+```
+
+测试结果：
+
+```text
+TODO
+```
+
+---
+
+# 六、Function 3：进程调度与上下文切换
 
 **负责人：2411302-王乐之**
 
-### 4.3.1 任务要求
+## 6.1 任务要求
 
-实现：
-
-```c
-void exception_handler(struct trapframe *tf);
-```
-
-函数位于：
+本部分主要实现和分析：
 
 ```text
-kern/trap/trap.c
+schedule()
+proc_run()
+switch_to()
 ```
 
-根据 Trap 原因处理对应异常。本实验主要关注：
+理解操作系统如何：
 
 ```text
-Illegal Instruction
-Breakpoint
+选择下一个进程
+      ↓
+切换地址空间
+      ↓
+切换 CPU 寄存器上下文
 ```
-
-对于无法识别的异常，输出 TrapFrame 以便调试。
-
-### 4.3.2 主要涉及文件
-
-```text
-kern/trap/trap.c
-kern/trap/trap.h
-```
-
-同时与 `trapentry.S` 中的 TrapFrame 保存与恢复过程直接相关。
-
-### 4.3.3 实现过程
-
-`exception_handler()` 接收汇编入口保存的 TrapFrame。`trap_dispatch()` 已经根据 `scause` 最高位确认当前 Trap 为 Exception，因此本函数直接根据 `tf->cause` 判断具体异常类型。
-
-本实验中：
-
-- `CAUSE_ILLEGAL_INSTRUCTION` 对应非法指令；
-- `CAUSE_BREAKPOINT` 对应断点异常；
-- 其他原因打印完整 TrapFrame 后返回。
-
-对于断点和非法指令，`sepc` 指向触发异常的指令。如果处理完以后不修改返回位置，执行 `sret` 后还会再次执行同一条指令，从而重复进入异常。
-
-因此需要根据当前指令长度推进 `tf->epc`。RISC-V 同时存在 16 位压缩指令和 32 位普通指令，所以不能固定执行 `epc += 4`。本实现先读取 EPC 地址处的 16 位内容，根据指令最低两位判断长度：
-
-```text
-最低两位为 11 → 32 位指令 → EPC + 4
-其他情况      → 16 位指令 → EPC + 2
-```
-
-修改后的 `tf->epc` 保存在 TrapFrame 中，之后由 `RESTORE_ALL` 写回 `sepc`，最终由 `sret` 从新的地址继续执行。
-
-### 4.3.4 关键代码
-
-```c
-//lab3 function2 exception_handler 2411302
-void exception_handler(struct trapframe *tf) {
-    switch (tf->cause) {
-    case CAUSE_ILLEGAL_INSTRUCTION:
-        cprintf("Illegal instruction at 0x%016lx\n",
-                (unsigned long)tf->epc);
-        break;
-
-    case CAUSE_BREAKPOINT:
-        cprintf("Breakpoint at 0x%016lx\n",
-                (unsigned long)tf->epc);
-        break;
-
-    default:
-        print_trapframe(tf);
-        return;
-    }
-
-    uint16_t instruction =
-        *(const volatile uint16_t *)tf->epc;
-
-    tf->epc +=
-        (instruction & 0x3) == 0x3 ? 4 : 2;
-}
-```
-
-### 4.3.5 Prompt
-
-完整 Prompt 见 `report/prompt.md`。本部分主要使用 AI 辅助分析异常原因、EPC 推进方式以及 16/32 位指令长度判断，实际实现以已有 TrapFrame、异常原因宏和统一恢复流程为依据。
-
-### 4.3.6 测试与验证
-
-整体代码完成后执行编译和官方测试。异常相关测试主要覆盖：
-
-- Breakpoint 能够正确进入异常处理；
-- 处理完成后能够跳过触发异常的指令；
-- Illegal Instruction 能够正确输出信息并继续执行；
-- 32 位异常指令能够正确推进 4 字节；
-- 16 位压缩指令按照 2 字节推进；
-- 未识别异常能够打印 TrapFrame；
-- 异常处理不会破坏其他寄存器现场。
-
-官方测试结果：
-
-```text
-trap entry, register restore, and breakpoint EPC:
-PASS (35/35)
-
-illegal instruction EPC advance and return:
-PASS (25/25)
-```
-
-补充检查中，16 位断点、32 位断点、16 位非法指令和 32 位非法指令均能够按照实际指令长度正确调整 EPC，说明当前处理方式能够兼容本实验涉及的 16/32 位指令。
 
 ---
 
-# 五、关键知识理解
+## 6.2 主要涉及文件
 
-## 5.1 Trap、Interrupt 与 Exception
-
-Trap 是处理器从当前执行流转入异常/中断处理流程的统一机制，其中包括 Interrupt 和 Exception。
-
-Interrupt 是异步事件，例如时钟中断，与当前正在执行的具体指令没有直接因果关系；Exception 是同步事件，例如非法指令和断点，由当前执行的指令直接触发。
-
-RV64 的 `scause` 最高位用于区分中断和异常，低位保存具体原因编号。`trap_dispatch()` 根据这一信息将 Trap 分发到 `interrupt_handler()` 或 `exception_handler()`。
-
-## 5.2 TrapFrame
-
-TrapFrame 是一次 Trap 发生时保存在栈上的 CPU 现场。当前结构包含 32 个通用寄存器槽以及：
+主要涉及：
 
 ```text
-status
-epc
-badvaddr
-cause
+kern/process/proc.c
+kern/schedule/
+kern/process/switch.S
 ```
 
-在 RV64 下共占 288 字节。
+具体文件以实验代码为准。
 
-`SAVE_ALL` 将寄存器和关键 CSR 保存到 TrapFrame；C 层通过 `struct trapframe *tf` 读取或修改现场；`RESTORE_ALL` 再根据同一布局恢复 CPU 状态。
+---
 
-## 5.3 与 Trap 有关的 CSR
+## 6.3 schedule()
 
-主要 CSR 作用如下：
+`schedule()` 的核心任务是：
+
+> 从可运行进程中选择一个进程作为下一个运行对象。
+
+因此调度本身解决的是：
 
 ```text
-stvec     Trap 入口地址
-sepc      Trap 返回相关 PC
-scause    Trap 原因
-sstatus   S 态运行状态和中断/特权级信息
-stval     Trap 附加信息（代码中使用旧名 sbadaddr）
-sscratch  S 态临时寄存器，本实验用于暂存原 sp
-sie       各类 S 态中断源使能
+接下来运行谁？
 ```
 
-初始化阶段通过 `stvec` 建立 Trap 入口；Trap 发生后硬件更新 `sepc`、`scause` 和 `sstatus`；汇编入口再将这些状态保存进 TrapFrame。
+而不是：
 
-## 5.4 Trap 入口和返回过程
-
-Trap 发生后，处理器根据 `stvec` 跳到 `__alltraps`。`SAVE_ALL` 保存完整现场后，`sp` 指向 TrapFrame，通过 `a0 = sp` 将现场指针传入 C 层。
-
-处理结束后，`RESTORE_ALL` 恢复 `sstatus`、`sepc` 和通用寄存器，最后恢复 `sp`，再执行 `sret` 返回。
-
-异常处理可以通过修改 `tf->epc` 改变最终写回的 `sepc`；时钟中断属于异步事件，因此不需要像断点或非法指令那样主动跳过当前指令。
-
-## 5.5 时钟中断
-
-时钟初始化位于 `kern/driver/clock.c`：
-
-```c
-void clock_init(void) {
-    set_csr(sie, MIP_STIP);
-    clock_set_next_event();
-    ticks = 0;
-}
+```text
+具体如何切换 CPU 状态？
 ```
 
-其中：
+---
 
-- `set_csr(sie, MIP_STIP)` 打开 Supervisor Timer Interrupt 对应的中断源；
-- `clock_set_next_event()` 设置第一次未来时钟事件；
-- `ticks = 0` 初始化软件计数器。
+## 6.4 基本流程
 
-下一次时钟事件通过：
+Lab4 中的调度过程可以概括为：
 
-```c
-sbi_set_timer(get_time() + timebase);
+```text
+schedule()
+    ↓
+关闭中断
+    ↓
+current->need_resched = 0
+    ↓
+寻找 PROC_RUNNABLE 进程
+    ↓
+选择 next
+    ↓
+如果没有则选择 idleproc
+    ↓
+next->runs++
+    ↓
+proc_run(next)
+    ↓
+恢复中断
 ```
 
-设置。`sbi_set_timer()` 通过 SBI 请求 OpenSBI 设置底层 timer。
+TODO：结合实际代码补充当前具体遍历方式。
 
-Timer 到期后进入统一 Trap 流程，在 `interrupt_handler()` 的 `IRQ_S_TIMER` 分支中重新调用 `clock_set_next_event()`，从而形成持续的周期性时钟中断。
+---
 
-`ticks` 使用 `volatile` 修饰，表示该变量可能在中断处理等当前代码之外的执行路径中发生变化，避免编译器对访问进行不合适的缓存或消除。
+## 6.5 proc_run()
 
-## 5.6 中断开关与临界区
+`proc_run()` 负责执行实际的进程切换准备。
 
-`sie` 用于控制具体的中断来源，而 `sstatus.SIE` 是 S 态全局中断开关。
+大致过程：
 
-底层接口：
+```text
+proc_run(next)
+    ↓
+判断 next != current
+    ↓
+保存当前中断状态
+    ↓
+关闭中断
+    ↓
+prev = current
+    ↓
+current = next
+    ↓
+切换页表 / 地址空间
+    ↓
+switch_to(&prev->context, &next->context)
+    ↓
+恢复中断状态
+```
+
+因此：
+
+```text
+schedule
+```
+
+负责“选择谁”，而：
+
+```text
+proc_run
+```
+
+负责“切过去”。
+
+---
+
+## 6.6 switch_to()
+
+`switch_to()` 是进程上下文切换的最低层实现。
+
+其核心过程是：
+
+```text
+保存 prev 的寄存器
+        ↓
+恢复 next 的寄存器
+        ↓
+CPU 从 next 上次停止的位置继续执行
+```
+
+在 RISC-V 中，按照函数调用约定，主要需要保存：
+
+```text
+ra
+sp
+s0 ~ s11
+```
+
+等需要跨函数调用保持的寄存器。
+
+---
+
+## 6.7 为什么不需要保存全部寄存器
+
+上下文切换由普通函数调用过程触发。
+
+按照 RISC-V ABI：
+
+```text
+caller-saved
+```
+
+寄存器本身就允许被被调用函数修改。
+
+而：
+
+```text
+callee-saved
+```
+
+寄存器必须在函数调用前后保持不变。
+
+因此 `switch_to()` 只需要保存真正需要跨调度保持的寄存器。
+
+---
+
+## 6.8 schedule 和 switch_to 的区别
+
+```text
+schedule()
+```
+
+解决：
+
+> 应该运行哪个进程？
+
+```text
+proc_run()
+```
+
+解决：
+
+> 如何准备切换到这个进程？
+
+```text
+switch_to()
+```
+
+解决：
+
+> CPU 寄存器如何真正从旧进程切换到新进程？
+
+因此：
+
+```text
+schedule
+    ↓
+策略
+
+proc_run
+    ↓
+进程切换控制
+
+switch_to
+    ↓
+机器级上下文切换
+```
+
+---
+
+## 6.9 为什么调度时要关闭中断
+
+进程调度过程中会修改：
+
+```text
+current
+进程状态
+Context
+地址空间
+CPU 寄存器
+```
+
+如果执行到一半突然产生中断，内核可能看到一个不一致的状态。
+
+例如：
+
+```text
+current 已经指向 next
+```
+
+但是：
+
+```text
+CPU 仍然在执行 prev 的上下文
+```
+
+此时如果中断处理代码再次访问 `current`，就可能发生错误。
+
+因此调度和上下文切换中的关键操作需要作为一个临界区执行。
+
+---
+
+## 6.10 local_intr_save() / local_intr_restore()
+
+典型使用：
 
 ```c
-intr_enable();
+bool intr_flag;
+
+local_intr_save(intr_flag);
+
+/* 临界区 */
+
+local_intr_restore(intr_flag);
+```
+
+`local_intr_save()` 不只是简单关闭中断。
+
+它首先：
+
+```text
+读取当前中断状态
+```
+
+然后：
+
+```text
+如果原本开启
+    ↓
+关闭中断
+```
+
+并保存之前的状态。
+
+之后：
+
+```text
+local_intr_restore()
+```
+
+根据之前保存的状态决定是否重新开启中断。
+
+---
+
+## 6.11 为什么不能简单 intr_disable() + intr_enable()
+
+假设进入临界区前：
+
+```text
+中断本来就是关闭的
+```
+
+如果直接：
+
+```c
 intr_disable();
+
+/* ... */
+
+intr_enable();
 ```
 
-直接控制 `sstatus.SIE`。
+离开临界区时就会错误地把原本关闭的中断重新打开。
 
-更高层的：
+因此正确做法是：
 
-```c
-local_intr_save(flag);
-local_intr_restore(flag);
+```text
+记住原状态
+    ↓
+关闭中断
+    ↓
+执行临界区
+    ↓
+恢复原状态
 ```
 
-用于保存进入临界区之前的中断状态，暂时关闭中断，并在关键操作完成后恢复原来的状态。
+而不是：
 
-例如物理内存分配过程中会修改空闲页链表等共享数据结构，因此需要避免在修改中途被异步中断打断。这体现了 Lab3 引入中断以后，内核代码开始需要考虑临界区、原子性和并发控制。
+```text
+无条件关闭
+    ↓
+无条件打开
+```
 
 ---
 
-# 六、测试与验证
+## 6.12 拓展练习：调度中的临界区
 
-## 6.1 编译验证
+调度过程中最重要的共享状态之一是：
 
-在 `lab3` 分支的 `code` 目录执行：
+```text
+current
+```
+
+除此之外还有：
+
+```text
+进程链表
+进程状态
+need_resched
+Context
+页表
+```
+
+这些状态在切换过程中必须保持一致。
+
+因此：
+
+```text
+local_intr_save()
+      ↓
+禁止当前 CPU 被中断打断
+      ↓
+完成关键状态修改
+      ↓
+switch_to()
+      ↓
+local_intr_restore()
+```
+
+保证切换过程不会被异步中断破坏。
+
+---
+
+## 6.13 测试与验证
+
+TODO
 
 ```bash
+make
+make qemu
+```
+
+测试结果：
+
+```text
+TODO
+```
+
+---
+
+# 七、Lab4 整体运行流程
+
+完成三个 Function 后，可以从系统启动角度重新理解 Lab4。
+
+```text
+OpenSBI
+    ↓
+kern_entry
+    ↓
+kern_init()
+    ↓
+物理内存初始化
+    ↓
+虚拟内存初始化
+    ↓
+Trap 初始化
+    ↓
+进程系统初始化
+    ↓
+proc_init()
+    ↓
+建立 idleproc
+    ↓
+kernel_thread()
+    ↓
+创建 initproc
+    ↓
+idleproc 运行
+    ↓
+schedule()
+    ↓
+选择 initproc
+    ↓
+proc_run()
+    ↓
+switch_to()
+    ↓
+initproc 第一次运行
+```
+
+Lab4 的关键就在于：
+
+> 让内核从“只有一条固定执行流”发展为“能够管理多个独立执行实体，并在它们之间进行切换”。
+
+---
+
+# 八、关键数据结构总结
+
+## 8.1 struct Page
+
+表示一个物理页。
+
+重点字段与操作：
+
+```text
+ref
+flags
+page_link
+```
+
+主要用于：
+
+```text
+物理页面管理
+引用计数
+空闲链表管理
+```
+
+---
+
+## 8.2 页表项 PTE
+
+页表项负责建立：
+
+```text
+虚拟页
+    ↓
+物理页
+```
+
+之间的映射。
+
+同时记录访问权限。
+
+---
+
+## 8.3 proc_struct
+
+对应操作系统理论中的：
+
+```text
+PCB
+```
+
+保存一个进程的：
+
+```text
+状态
+PID
+内核栈
+内存空间
+上下文
+TrapFrame
+调度信息
+父进程关系
+```
+
+---
+
+## 8.4 context
+
+用于进程上下文切换。
+
+保存：
+
+```text
+ra
+sp
+s0 ~ s11
+```
+
+等需要保留的寄存器。
+
+---
+
+## 8.5 trapframe
+
+用于保存发生 Trap 时的完整 CPU 状态。
+
+同时也可以被用于：
+
+> 人为构造新线程第一次运行时的执行现场。
+
+这是 Lab3 和 Lab4 之间非常重要的连接。
+
+---
+
+# 九、进程状态
+
+本实验中主要涉及：
+
+```text
+PROC_UNINIT
+PROC_SLEEPING
+PROC_RUNNABLE
+PROC_ZOMBIE
+```
+
+其中 Lab4 最关键的是：
+
+```text
+PROC_UNINIT
+      ↓
+创建完成
+      ↓
+PROC_RUNNABLE
+      ↓
+被 schedule 选中
+      ↓
+运行
+```
+
+后续实验还会继续完善：
+
+```text
+睡眠
+退出
+等待
+回收
+```
+
+等生命周期状态。
+
+---
+
+# 十、三个 Function 之间的关系
+
+本实验三个部分看似独立，实际上组成了一条完整链路。
+
+```text
+Function 1
+内存和页面映射
+      ↓
+为进程提供正确的地址转换基础
+
+Function 2
+进程创建
+      ↓
+建立 PCB、内核栈和执行上下文
+
+Function 3
+调度和上下文切换
+      ↓
+让进程真正获得 CPU
+```
+
+最终形成：
+
+```text
+内存资源
+    ↓
+创建进程
+    ↓
+建立执行现场
+    ↓
+进入可运行状态
+    ↓
+调度
+    ↓
+上下文切换
+    ↓
+运行
+```
+
+---
+
+# 十一、实验测试
+
+## 11.1 编译测试
+
+```bash
+cd ~/os-lab/nku-os/code
+
 make clean
-make -j4
+make
 ```
 
-编译和链接成功，能够生成：
+结果：
 
 ```text
-bin/kernel
-bin/ucore.img
+TODO
 ```
-
-说明 Trap 入口、中断处理和异常处理代码能够正确参与完整内核构建。
-
-## 6.2 QEMU 运行验证
-
-运行内核后能够看到时钟中断初始化信息，并持续输出：
-
-```text
-++ setup timer interrupts
-100 ticks
-100 ticks
-...
-```
-
-累计达到设定次数后，通过 SBI 正常结束运行。
-
-这说明：
-
-- `clock_init()` 能够正确设置第一次时钟事件；
-- Timer Interrupt 能够进入统一 Trap 处理流程；
-- `interrupt_handler()` 能够重新设置下一次事件；
-- `RESTORE_ALL + sret` 能够多次正常完成 Trap 返回。
-
-## 6.3 官方测试
-
-执行实验提供的测试后，结果为：
-
-```text
-trap entry, register restore, and breakpoint EPC:
-PASS (35/35)
-
-illegal instruction EPC advance and return:
-PASS (25/25)
-
-re-armed supervisor timer and repeated trap return:
-PASS (40/40)
-
-Total Score: 100/100
-```
-
-三项测试分别验证了：
-
-1. Trap 入口、寄存器现场保存与恢复以及断点 EPC 调整；
-2. 非法指令异常处理和返回位置推进；
-3. 时钟中断持续重设、重复 Trap 返回以及 `ticks` 正常增长。
-
-最终结果表明三部分代码能够正确衔接，形成完整的 Trap 处理闭环。
 
 ---
 
-# 七、实验结果
+## 11.2 QEMU 运行测试
 
-本实验完成了 RISC-V 下 Trap 入口、上下文恢复、中断处理和异常处理的实现。
+```bash
+make qemu
+```
 
-Trap 发生后，系统能够通过 `stvec` 进入统一汇编入口，在栈上建立 TrapFrame，并将现场传递给 C 层处理。`trap_dispatch()` 能够根据 `scause` 将事件正确分发到中断或异常处理函数。
+结果：
 
-在中断处理方面，Supervisor Timer Interrupt 能够持续触发，每次进入处理函数后重新设置下一次时钟事件并更新 `ticks`，最终按照实验要求完成周期性输出和正常关机。
-
-在异常处理方面，Breakpoint 和 Illegal Instruction 能够正确识别。通过读取指令最低 16 位判断当前指令长度，能够分别处理 16 位压缩指令和 32 位普通指令，避免固定增加 4 字节导致返回位置错误。
-
-完整代码通过编译、QEMU 运行和官方测试，最终测试结果为 100/100。
+```text
+TODO
+```
 
 ---
 
-# 八、实验总结
+## 11.3 官方测试
 
-本实验将 RISC-V 硬件提供的 Trap 机制与操作系统的软件处理流程完整连接起来。通过本次实验，我们对 Trap 的理解不再停留在“中断来了执行处理函数”这一层，而是进一步理解了从初始化、硬件记录 CSR、汇编保存现场、C 层分发处理，到恢复现场和 `sret` 返回的完整过程。
+按照实验指导书执行对应测试。
 
-在 Trap 入口部分，`SAVE_ALL` 和 `RESTORE_ALL` 体现了操作系统对 CPU 执行现场的管理，TrapFrame 则成为汇编层和 C 层之间传递状态的统一数据结构。`stvec`、`sepc`、`scause`、`sstatus` 等 CSR 分别承担 Trap 入口、返回位置、原因和处理器状态等作用。
+```bash
+TODO
+```
 
-在中断处理部分，通过时钟中断进一步理解了 `sie` 与 `sstatus.SIE` 的区别，以及 `clock_set_next_event()` 和 SBI timer 的关系。每次时钟中断后重新设置下一次事件，才能形成持续的周期性中断。
+结果：
 
-在异常处理部分，通过 Breakpoint 和 Illegal Instruction 的处理理解了同步异常与异步中断在返回语义上的区别。异常处理需要根据具体指令长度调整 EPC，而时钟中断通常保持原有返回位置。
+```text
+TODO
+```
 
-此外，中断机制的引入也使内核代码开始需要考虑临界区和并发问题。`local_intr_save()` / `local_intr_restore()` 通过保存并恢复原中断状态，为共享数据结构的关键操作提供了基本保护。
+---
 
-最终三位成员负责的 Trap 入口、中断处理和异常处理能够正确衔接，官方测试全部通过。通过本实验，对 RISC-V Trap 机制以及操作系统中断、异常和上下文恢复过程形成了较完整的认识。
+## 11.4 Git 修改检查
+
+```bash
+git status
+git diff --check
+git diff --stat
+git diff
+```
+
+用于检查：
+
+```text
+修改文件范围
+格式问题
+意外修改
+三人代码整合结果
+```
+
+---
+
+# 十二、实验结果
+
+## Function 1
+
+TODO
+
+应包括：
+
+```text
+page_insert()
+page_remove()
+页引用计数
+TLB 刷新
+测试结果
+```
+
+## Function 2
+
+TODO
+
+应包括：
+
+```text
+proc_struct 初始化
+do_fork()
+copy_thread()
+内核线程创建
+测试结果
+```
+
+## Function 3
+
+TODO
+
+应包括：
+
+```text
+schedule()
+proc_run()
+switch_to()
+上下文切换
+测试结果
+```
+
+## 整体运行结果
+
+TODO
+
+---
+
+# 十三、实验中遇到的问题及解决方法
+
+## 问题一
+
+现象：
+
+```text
+TODO
+```
+
+原因：
+
+```text
+TODO
+```
+
+解决：
+
+```text
+TODO
+```
+
+---
+
+## 问题二
+
+现象：
+
+```text
+TODO
+```
+
+原因：
+
+```text
+TODO
+```
+
+解决：
+
+```text
+TODO
+```
+
+---
+
+## 问题三
+
+现象：
+
+```text
+TODO
+```
+
+原因：
+
+```text
+TODO
+```
+
+解决：
+
+```text
+TODO
+```
+
+---
+
+# 十四、实验重要知识点总结
+
+## 14.1 页表映射不仅是写一个 PTE
+
+建立一个页面映射时，还需要同时处理：
+
+```text
+页表项
+页面引用计数
+原有映射
+页面释放
+TLB
+```
+
+因此 `page_insert()` 和 `page_remove()` 实际体现的是一套完整的页面映射生命周期管理。
+
+---
+
+## 14.2 PCB 是操作系统管理进程的核心
+
+操作系统不能直接管理一个抽象的“程序”。
+
+它需要将进程运行相关信息保存在：
+
+```text
+proc_struct
+```
+
+中。
+
+因此：
+
+```text
+进程
+    ↓
+在内核中的表示
+    ↓
+PCB / proc_struct
+```
+
+---
+
+## 14.3 创建进程和运行进程是两个不同阶段
+
+创建阶段：
+
+```text
+分配 PCB
+分配内核栈
+建立内存信息
+建立 Context
+建立 TrapFrame
+```
+
+运行阶段：
+
+```text
+schedule
+proc_run
+switch_to
+```
+
+因此：
+
+```text
+do_fork()
+    ↓
+只是创建完成
+
+schedule()
+    ↓
+决定什么时候真正运行
+```
+
+---
+
+## 14.4 Context 和 TrapFrame 作用不同
+
+```text
+Context
+    ↓
+进程切换
+
+TrapFrame
+    ↓
+Trap 保存 / 恢复
+```
+
+但对于新进程第一次运行，两者会配合工作。
+
+---
+
+## 14.5 调度和上下文切换不是同一个概念
+
+调度：
+
+```text
+选择谁运行
+```
+
+上下文切换：
+
+```text
+真正把 CPU 从一个进程切到另一个进程
+```
+
+因此：
+
+```text
+schedule()
+    ↓
+proc_run()
+    ↓
+switch_to()
+```
+
+是三个不同层次。
+
+---
+
+## 14.6 local_intr_save / restore 保存的是“原来的状态”
+
+它们并不是单纯地：
+
+```text
+关中断
+开中断
+```
+
+而是：
+
+```text
+保存原中断状态
+    ↓
+关闭中断
+    ↓
+执行临界区
+    ↓
+恢复之前的中断状态
+```
+
+这样可以正确支持嵌套的临界区。
+
+---
+
+# 十五、Lab2、Lab3 与 Lab4 的联系
+
+Lab4 中可以明显看到之前实验的机制重新被使用。
+
+```text
+Lab2
+Page / PTE / 页表
+    ↓
+Lab4 Function 1 页面映射
+
+Lab3
+TrapFrame / 中断保护
+    ↓
+Lab4 新线程首次运行
+    ↓
+Lab4 调度临界区
+
+Lab4
+proc_struct / schedule / switch_to
+    ↓
+形成真正的多执行流内核
+```
+
+因此 Lab4 是前几个实验第一次明显汇合的阶段。
+
+---
+
+# 十六、实验总结
+
+本实验在前面物理内存、虚拟内存以及 Trap 机制的基础上，实现了基本的进程管理框架。
+
+实验首先进一步完善页面映射相关操作，通过 `page_insert()` 和 `page_remove()` 管理虚拟地址和物理页面之间的映射关系。
+
+随后通过 `proc_struct`、`do_fork()`、`copy_thread()` 等机制建立新的进程或内核线程，并为新进程分配内核栈、构造执行上下文，使其具备被调度运行的条件。
+
+最后通过 `schedule()`、`proc_run()` 和 `switch_to()` 完成进程选择和上下文切换，使 CPU 能够在不同执行实体之间切换。
+
+整个 Lab4 的核心过程可以概括为：
+
+```text
+页面与地址空间
+      ↓
+建立 PCB
+      ↓
+创建进程
+      ↓
+建立 Context / TrapFrame
+      ↓
+PROC_RUNNABLE
+      ↓
+schedule()
+      ↓
+proc_run()
+      ↓
+switch_to()
+      ↓
+进程运行
+```
+
+通过本实验，可以更加直观地理解课堂中进程控制块、进程创建、调度、上下文切换、临界区和中断保护等概念如何真正落实到操作系统内核代码中。
