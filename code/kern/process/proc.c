@@ -347,4 +347,34 @@ proc_init(void)
 }
 
 
-//LAB4 function3 YOUR CODE
+//LAB4 function3 2411302
+// Switch address space and the callee-saved execution context atomically.
+void
+proc_run(struct proc_struct *proc)
+{
+    if (proc != current)
+    {
+        bool intr_flag;
+        local_intr_save(intr_flag);
+        struct proc_struct *prev = current;
+        current = proc;
+        // pgdir stores a physical address; RV64 Sv39 uses MODE = 8.
+        write_csr(satp, ((uintptr_t)8 << 60) | (proc->pgdir >> RISCV_PGSHIFT));
+        flush_tlb();
+        switch_to(&prev->context, &proc->context);
+        // Reached when this process is selected again, on its own stack.
+        local_intr_restore(intr_flag);
+    }
+}
+
+void
+cpu_idle(void)
+{
+    while (1)
+    {
+        if (current->need_resched)
+        {
+            schedule();
+        }
+    }
+}

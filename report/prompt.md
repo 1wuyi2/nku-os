@@ -98,3 +98,23 @@
 3. 新增可复现的独立创建测试，覆盖初值、多个线程、指定栈、中断状态、分配失败和进程数上限；
 4. 在 QEMU 中调用现有 `test_lab4_process_create()` 并执行补充断言，保存真实日志；
 5. 记录原工程完整构建仍被 Function 3 的 `cpu_idle` 未定义阻塞；
+
+---
+
+## 王乐之 2411302：Function 3 与 Challenge 1
+
+### [PROMPT]
+
+依据 lab4 分支 report.md 的分工，实现王乐之负责的进程调度与上下文切换，分析中断状态保存和恢复，并在实际测试后更新本人报告。提交到原仓库 lab4 分支，提交说明为“完成了lab4调度切换部分的代码”。
+
+### [RELY]
+
+Function 1 和 Function 2 已由队友完成。proc.c、sched.c、switch.S 中保留 LAB4 function3 空缺；context 按 ra、sp、s0～s11 排列，pgdir 保存 Sv39 根页表物理地址。使用现有 idleproc/current/proc_list、trapframe、forkrets 和中断保护宏。远程最新代码与用户压缩包逐文件哈希核对一致；另附 PDF 实际为图形学内容，采用本仓库 Lab4 报告分工。
+
+### [GUARANTEE]
+
+保留已有结构、队友函数和历史报告章节，不修改原评分脚本或 Makefile；仅将本人 function3 的 YOUR CODE 换成 2411302。不把 do_exit 占位改成测试通过路径，不宣称已实现退出回收或时间片抢占。日志、环境包装器及补充测试位于仓库外，不新增 evidence 或提交构建产物。所有测试结果以实际输出为准，推送前核对远程分支，使用非强制更新。
+
+### [SPECIFICATION]
+
+schedule 保存/恢复原中断状态，清除 need_resched，从当前进程之后循环选择 RUNNABLE，跳过表头、处理 idle 不在链表中的情况，无可运行进程时回退 idle，维护 runs，避免自身切换。proc_run 在中断保护下更新 current、正确构造 RV64 Sv39 satp、刷新 TLB 并调用 switch_to。switch_to 按结构偏移保存/恢复全部 ra、sp、s0～s11；cpu_idle 根据调度请求调用 schedule。Challenge 结合 __intr_save/__intr_restore、SSTATUS_SIE、intr_disable/intr_enable 说明嵌套与单核限制。执行完整编译、默认 QEMU 和 make grade，并在独立副本中补测空表/全休眠、自身选择、轮转、全部保存寄存器及切换前后的中断状态。

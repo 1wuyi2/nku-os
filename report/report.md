@@ -6,7 +6,7 @@
 |---|---|
 | 实验名称 | Lab4：进程管理 |
 | 小组成员 | 2412771-谭锦睿、2413581-黄奕浩、2411302-王乐之 |
-| 完成日期 | 2026-11-XX |
+| 完成日期 | 2026-11-20 |
 | 实验分支 | `lab4` |
 | 代码目录 | `code/` |
 | 报告目录 | `report/` |
@@ -37,13 +37,13 @@
 - [x] 恢复 Lab2 / Lab3 前置依赖
 - [x] Function 1：完成 `page_insert()` / `page_remove()`
 - [x] Function 2：完成六个创建函数
-- [ ] Function 3：待对应成员完成
-- [ ] 三人代码整合
-- [ ] 完整编译
-- [ ] QEMU 运行验证
-- [ ] 官方测试
-- [ ] 完善实验报告
-- [ ] 整理完整 Prompt
+- [x] Function 3：完成进程调度与上下文切换及中断保护 Challenge
+- [x] 三人代码整合
+- [x] 完整编译
+- [x] QEMU 运行验证
+- [x] 官方测试
+- [x] 完善实验报告
+- [x] 整理完整 Prompt
 
 ### 报告分工
 
@@ -776,115 +776,118 @@ echo $?
 
 **负责人：2411302-王乐之**
 
-> 本节由负责人根据本人实际代码实现补充。
-
 ## 7.1 任务要求
 
-TODO：根据实验指导书和本人实际负责范围填写。
-
----
+实现 `schedule()`、`proc_run()`、`cpu_idle()` 和 `switch_to()`，从 RUNNABLE 进程中循环选择执行对象，完成内核线程首次运行和后续现场恢复。保留原 LAB4 function3 标记，将本人的 `YOUR CODE` 替换为学号 2411302；不修改 Function 1、Function 2 或原有评分测试。
 
 ## 7.2 主要涉及文件
 
-TODO：根据实际修改文件填写。
-
-例如可能涉及：
-
-```text
-code/kern/process/
-code/kern/schedule/
-```
-
-具体以本人实际实现为准。
-
----
+| 文件 | 实现 |
+|---|---|
+| `code/kern/schedule/sched.c` | `schedule()`：循环扫描、跳过不可运行进程、idle 回退、维护 runs 和 need_resched |
+| `code/kern/process/proc.c` | `proc_run()`：中断保护、current 与 satp 更新、TLB 刷新；`cpu_idle()`：检查调度请求 |
+| `code/kern/process/switch.S` | `switch_to()`：保存和恢复 ra、sp、s0～s11 |
 
 ## 7.3 实现过程
 
-TODO：根据实际代码填写。
+`schedule()` 首先保存中断状态并关闭本地中断，再清除当前进程的 `need_resched`。idleproc 没有加入普通进程链表，所以从 idle 出发时以 `proc_list` 表头为起点；普通进程则从自己的 `list_link` 后方开始扫描，遇到表头时跳过它并继续循环。只选择 `PROC_RUNNABLE`，扫描一圈仍未找到时选择 idleproc。这样同时覆盖空链表、全部休眠以及只有当前进程可运行的情况。
 
-建议重点说明：
+选定对象后增加 `runs`。若仍是当前进程，则不执行汇编切换；否则调用 `proc_run()`。`proc_run()` 再次保存中断状态，先记录旧进程再更新 `current`，以 `8 << 60 | pgdir >> 12` 构造 RV64 Sv39 的 satp，并执行 `sfence.vma` 刷新 TLB，最后切换两个 context。PCB 的 pgdir 保存页表物理地址，不能直接写入 satp，也不能使用当前头文件中面向 RV32 的 `lsatp(unsigned int)`。
 
-```text
-调度入口
-如何选择下一个执行实体
-什么时候发生上下文切换
-切换前后哪些状态发生变化
-```
+`switch_to()` 按 `struct context` 的顺序保存旧线程的 ra、sp、s0～s11，再从目标结构恢复同一组寄存器，最后执行 `ret`。RV64 每项占 8 字节，最后一个 s11 位于偏移 104。ra、sp 决定恢复后的返回位置和内核栈；s0～s11 是调用约定要求被调用者保存的寄存器。a0～a7 和 t0～t6 可以被普通函数调用破坏，不属于这里的 context；完整异常现场由 trapframe 保存。gp、tp 在当前内核线程模型中共享，并未作为每线程状态切换。
 
----
+首次调度 initproc 时，预先设置的 context.ra 指向 `forkret`，context.sp 指向其内核栈中的 trapframe；随后经 `forkrets`、`RESTORE_ALL`、`sret` 到达 `kernel_thread_entry`，再调用 s0 中的线程函数并传入 s1 中的参数。之后再次选中旧线程时，`switch_to()` 从它原来的调用点返回，继续执行该线程栈上尚未完成的中断恢复代码。
+
+`cpu_idle()` 持续检查 `current->need_resched`，有请求就调用调度器。当前实现是合作式循环调度；原时钟中断没有新增抢占调度入口，不能把本实验描述成已实现时间片抢占、用户进程或完整退出回收。
 
 ## 7.4 关键代码
 
-TODO：粘贴本人实际修改代码。
-
-```c
-// TODO
-```
-
----
-
-## 7.5 调用关系
-
-TODO：根据实际调用关系填写。
-
-```text
-TODO
-```
-
----
-
-## 7.6 Challenge 1：中断状态保存与恢复
-
-需要说明：
-
 ```c
 local_intr_save(intr_flag);
-
-/* 临界区 */
-
+struct proc_struct *prev = current;
+current = proc;
+write_csr(satp, ((uintptr_t)8 << 60) | (proc->pgdir >> RISCV_PGSHIFT));
+flush_tlb();
+switch_to(&prev->context, &proc->context);
 local_intr_restore(intr_flag);
 ```
 
-如何实现中断状态的保存、关闭和恢复。
-
-TODO：由负责人结合实际宏和底层函数完成分析。
-
-建议结合：
-
-```text
-sstatus
-SSTATUS_SIE
-__intr_save()
-__intr_restore()
-intr_disable()
-intr_enable()
+```c
+if (next == NULL)
+{
+    next = idleproc;
+}
+next->runs++;
+if (next != current)
+{
+    proc_run(next);
+}
 ```
 
-分析。
+汇编对 ra、sp、s0～s11 分别执行 `STORE reg, offset(a0)` 和 `LOAD reg, offset(a1)`。完整实现位于原 `switch.S`，使用框架 `REGBYTES`、`STORE`、`LOAD` 宏与结构体布局对应。
 
----
+## 7.5 调用关系
+
+```text
+kern_init -> proc_init（Function 2 准备 idleproc/initproc）
+          -> cpu_idle -> schedule -> proc_run -> switch_to
+                                                   | 首次运行
+                                                   v
+                         forkret -> forkrets -> __trapret
+                         -> RESTORE_ALL -> sret -> kernel_thread_entry
+                         -> init_main("Hello world!!")
+
+线程主动 schedule -> 下一个 RUNNABLE 线程
+                 -> 再次被选中后返回原 switch_to 调用点
+```
+
+## 7.6 Challenge 1：中断状态保存与恢复
+
+实际实现位于 `code/kern/sync/sync.h` 和 `code/kern/driver/intr.c`：
+
+```c
+static inline bool __intr_save(void) {
+    if (read_csr(sstatus) & SSTATUS_SIE) {
+        intr_disable();
+        return 1;
+    }
+    return 0;
+}
+static inline void __intr_restore(bool flag) {
+    if (flag) {
+        intr_enable();
+    }
+}
+```
+
+`local_intr_save(intr_flag)` 将 `__intr_save()` 返回值写入调用者的局部变量。进入前 SIE 为 1 时，`intr_disable()` 通过 `clear_csr(sstatus, SSTATUS_SIE)` 关闭 S 态中断并返回真；原来已经关闭则返回假。退出时只在标志为真时调用 `intr_enable()`，用 `set_csr` 设置 SIE。这里保存的是 SIE 开关，不是整个 sstatus；恢复函数不会覆盖其他状态位。
+
+嵌套调用必须各自使用独立变量，并按相反顺序退出：外层保存 1 并关中断，内层看到 0；内层恢复 0 时保持关闭，外层最后恢复 1 才开启。原来就是关中断时，整对调用不会误开中断。严格说 `__intr_restore(false)` 是不操作，并非强制清零；临界区内部必须遵守不擅自开启中断的约定。
+
+`schedule()` 和 `proc_run()` 的嵌套保护就是这种情形。线程切换后各自栈上的 `intr_flag` 仍保留，返回原调用链时再恢复各自进入时的中断状态；新线程首次运行则通过 trapframe 中的 SPIE 和 `sret` 恢复中断。此机制保护单核本地中断临界区，不能单独提供多核之间的互斥，也不能阻止同步异常。
 
 ## 7.7 实现中遇到的问题
 
-TODO：根据本人实际开发过程填写。
-
----
+1. idleproc 不在普通进程链表中，不能直接使用它的链表节点作为普通循环起点；采用表头起点和显式跳过表头，补测空链表与全休眠回退。
+2. 工程头文件的 `lsatp()` 使用 RV32 模式及 32 位参数；本模块按已有 RV64 Sv39 页表初始化逻辑构造 satp，避免模式和地址截断错误。
+3. 本地只有 `gdb-multiarch`，旧 QEMU 与默认架构自动识别不兼容，初次评分没有串口输出。在仓库外配置启动包装器，显式选择 `riscv:rv64` 后重新执行原评分脚本，获得 30/30；没有修改 Makefile 或评分检查条件。
+4. init_main 返回后，框架 `do_exit()` 仍会输出 `process exit!!.` 并进入调试监视器；这是当前退出占位路径，保留原实现，不将其描述为正常线程退出与资源回收。
 
 ## 7.8 测试与验证
 
-```bash
-make
-make qemu
-```
+实际执行完整构建、默认 QEMU 和仓库评分测试，命令与整体输出见第九节。评分中的两个测试线程各自反复主动调度，原 `[Test Schedule] PASS` 检查通过。
 
-实际结果：
+另在仓库外独立副本中添加临时断言和汇编测试调用者，未向正式代码插入测试分支。实际输出：
 
 ```text
-TODO
+[Function 3] empty/all-sleeping list selects idle: PASS
+[Function 3] nested interrupt restore and self selection: PASS
+[Function 3] 64 ordered worker visits, stacks, satp, SIE: PASS
+[Function 3] s0-s11 sentinels and sp/ra return paths: PASS
+[Function 3] ALL EXTRA TESTS PASSED
 ```
 
-不要填写未实际执行的结果。
+检查内容包括：空表及全休眠时选择 idle；仅当前线程可运行时 runs 增加而不切换；need_resched 清零；开/关中断入口及嵌套恢复；两个新线程共 64 次有序运行；各线程内核栈范围与 satp；真实切换前后全部 s0～s11 哨兵值保持，并通过原 sp/ra 返回调用链。调用线程以关中断状态调度，新线程以自身 trapframe 恢复为开中断，返回调用线程后仍为关中断。补充测试主动调用 SBI 关机，QEMU 返回 0 且无 panic。
 
 ---
 
@@ -908,10 +911,10 @@ Function 2
 Function 3
 调度与上下文切换
     ↓
-TODO：负责人完成后补充
+选择 RUNNABLE 进程、切换页表和内核栈、恢复 context，首次运行再通过 trapframe 进入线程函数
 ```
 
-完整关系等待三个 Function 全部实现并运行验证后再补充。
+三个 Function 已完成整合并通过仓库评分测试。第四至六节保留队友各阶段记录，其中“等待整合”等描述反映当时状态；本次最终集成结果以第九节为准。
 
 ---
 
@@ -919,51 +922,71 @@ TODO：负责人完成后补充
 
 ## 9.1 编译测试
 
-最终合并后执行：
+在 WSL Ubuntu 中执行：
 
 ```bash
-cd ~/os-lab/nku-os/code
+cd /home/wlz/nku-os-lab4-git/code
 make clean
-make
+make -j4
 ```
 
-结果：
-
-```text
-TODO：三人代码合并后填写
-```
-
----
+实际成功生成 `bin/kernel` 和 `bin/ucore.img`。Function 3 没有新增编译警告。框架 `kmalloc.c` 原有整数转指针警告、评分测试线程返回类型警告仍存在，未修改队友或原测试源码。
 
 ## 9.2 QEMU 测试
 
-执行：
+本机使用 QEMU 4.1.1 与其自带 OpenSBI 0.4；为评分脚本和默认启动共用同一环境，在仓库外配置 PATH 包装器：
 
 ```bash
+mkdir -p /home/wlz/.cache/lab4-work/bin
+cat > /home/wlz/.cache/lab4-work/bin/qemu-system-riscv64 <<'EOF'
+#!/bin/sh
+exec /home/wlz/.local/opt/qemu-4.1.1/bin/qemu-system-riscv64 -L /home/wlz/.local/opt/qemu-4.1.1/share/qemu "$@"
+EOF
+cat > /home/wlz/.cache/lab4-work/bin/riscv64-unknown-elf-gdb <<'EOF'
+#!/bin/sh
+exec /usr/bin/gdb-multiarch -ex "set architecture riscv:rv64" "$@"
+EOF
+chmod +x /home/wlz/.cache/lab4-work/bin/*
+export PATH="/home/wlz/.cache/lab4-work/bin:$PATH"
 make qemu
 ```
 
-结果：
+实际关键输出：
 
 ```text
-TODO：三人代码合并后填写
+check_alloc_page() succeeded!
+check_pgdir() succeeded!
+check_boot_pgdir() succeeded!
+kmalloc_init() succeeded!
+check_vmm() succeeded.
+this initproc, pid = 1, name = "init"
+To U: "Hello world!!".
+To U: "en.., Bye, Bye. :)"
+kernel panic at kern/process/proc.c:208:
+    process exit!!.
 ```
 
----
+最后一段为框架 do_exit 占位输出，进入原调试监视器后由其中的 `sbi_shutdown()` 关机。已验证首次切换和线程函数运行，没有实现完整退出和回收功能。
 
 ## 9.3 官方测试
 
-按照实验指导书执行对应测试。
+沿用上述 PATH，执行仓库原有评分入口（自动复制到临时目录注入原测试，不修改正式源码）：
 
-```text
-TODO
+```bash
+cd /home/wlz/nku-os-lab4-git/code
+make grade
 ```
 
-结果：
+实际输出：
 
 ```text
-TODO
+  -check PMM:                                OK
+  -check Process Create:                     OK
+  -check Schedule:                           OK
+Total Score: 30/30
 ```
+
+分别为页面映射 10 分、创建 10 分、调度 10 分。评分脚本同时要求 initproc 的三条问候输出。补充寄存器和边界测试结果见 7.8。
 
 ---
 
@@ -1034,13 +1057,13 @@ Function 1 当前已经完成源码编译验证。
 
 **负责人：2411302-王乐之**
 
-TODO：负责人完成后填写本人实际结果。
+已实现 `schedule()`、`proc_run()`、`cpu_idle()` 和 `switch_to()`，完成 Challenge 1 分析。实际通过原调度评分以及空表、全休眠、自身选择、双线程轮转、寄存器和中断状态补充检查。
 
 ---
 
 ## 10.4 整体运行结果
 
-TODO：三人代码整合并完成 QEMU 测试后统一填写。
+三个 Function 已整合：完整编译成功，QEMU 能运行 initproc 并输出问候，原评分 `Total Score: 30/30`。进程退出仍为框架占位，未扩展用户态或时钟抢占。
 
 ---
 
@@ -1117,7 +1140,7 @@ cpu_idle
 
 ## 其他问题
 
-TODO：由各成员根据实际开发过程继续补充。
+本次 Function 3 的链表边界、Sv39 satp 和 GDB 环境问题及解决方法见 7.7。
 
 ---
 
@@ -1206,7 +1229,7 @@ tlb_invalidate(pgdir, la);
 
 ## 12.5 Function 2 / Function 3
 
-Function 2 将普通函数和参数组织成新线程的初始现场：context 使第一次 switch_to 返回 forkret，trapframe 再使 sret 到达 kernel_thread_entry。RUNNABLE 只表示线程具备被调度条件；Function 3 负责选择并实际切换线程。当前已验证创建现场，实际切换仍待 Function 3。
+Function 2 将普通函数和参数组织成新线程的初始现场：context 使第一次 switch_to 返回 forkret，trapframe 再使 sret 到达 kernel_thread_entry。RUNNABLE 只表示线程具备被调度条件；Function 3 负责选择并实际切换线程。创建现场已通过 Function 3 实际恢复并执行，调度与创建的集成检查通过。
 
 ---
 
@@ -1237,13 +1260,13 @@ Trap 入口
 
 因此 Lab4 是前面实验功能进一步组合的阶段。
 
-Function 2 使用 Lab2 的页分配器建立每线程独立内核栈，使用 Lab3 的 trapframe、RESTORE_ALL 和 sret 组织首次运行路径，并通过保存/恢复中断状态保护进程登记。Function 3 的补充由对应成员完成。
+Function 2 使用 Lab2 的页分配器建立每线程独立内核栈，使用 Lab3 的 trapframe、RESTORE_ALL 和 sret 组织首次运行路径，并通过保存/恢复中断状态保护进程登记。Function 3 通过调度和 context 切换连接这些现场，使新线程真正开始执行，并在后续调度中恢复各自的内核栈。
 
 ---
 
 # 十四、实验总结
 
-当前已经完成 Lab4 前置 Lab2 / Lab3 依赖的恢复，并完成本人负责的 Function 1 页面映射功能。
+本组已完成 Lab4 前置 Lab2 / Lab3 依赖恢复及三个 Function 的实现和整合。
 
 Function 1 中主要实现：
 
@@ -1271,4 +1294,4 @@ copy_mm()
 
 同时通过独立 QEMU 创建测试，进一步理解了内核线程首次运行现场的组织方式，以及资源分配失败时回收内核栈和进程控制块的处理过程。
 
-待三个部分全部完成后，再统一进行完整编译、QEMU 运行、官方测试以及最终实验总结。
+王乐之负责的 Function 3 完成循环调度、页表和上下文切换、idle 调度入口，并结合实际宏分析中断保护。完整构建、默认 QEMU 及原评分测试均已执行，评分为 30/30；独立补充检查覆盖寄存器保存和中断状态边界。当前框架尚未实现正常退出回收及抢占调度。
