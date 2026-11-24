@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <unistd.h>
 
 /* ------------- process/thread mechanism design&implementation -------------
 (an simplified Linux process/thread mechanism )
@@ -81,6 +82,26 @@ void kernel_thread_entry(void);
 void forkrets(struct trapframe *tf);
 void switch_to(struct context *from, struct context *to);
 
+//lab4 请补充你在lab4中的代码
+
+//lab5 function2 YOUR CODE update alloc_proc
+static struct proc_struct *
+alloc_proc(void)
+{
+    struct proc_struct *proc = kmalloc(sizeof(struct proc_struct));
+    if (proc != NULL)
+    {
+        memset(proc, 0, sizeof(struct proc_struct));
+        proc->state = PROC_UNINIT;
+        proc->pid = -1;
+        proc->pgdir = boot_pgdir_pa;
+        list_init(&proc->list_link);
+        list_init(&proc->hash_link);
+    }
+    return proc;
+}
+
+
 // set_proc_name - set the name of proc
 char *
 set_proc_name(struct proc_struct *proc, const char *name)
@@ -96,6 +117,40 @@ get_proc_name(struct proc_struct *proc)
     static char name[PROC_NAME_LEN + 1];
     memset(name, 0, sizeof(name));
     return memcpy(name, proc->name, PROC_NAME_LEN);
+}
+
+// set_links - set the relation links of process
+static void
+set_links(struct proc_struct *proc)
+{
+    list_add(&proc_list, &(proc->list_link));
+    proc->yptr = NULL;
+    if ((proc->optr = proc->parent->cptr) != NULL)
+    {
+        proc->optr->yptr = proc;
+    }
+    proc->parent->cptr = proc;
+    nr_process++;
+}
+
+// remove_links - clean the relation links of process
+static void
+remove_links(struct proc_struct *proc)
+{
+    list_del(&(proc->list_link));
+    if (proc->optr != NULL)
+    {
+        proc->optr->yptr = proc->yptr;
+    }
+    if (proc->yptr != NULL)
+    {
+        proc->yptr->optr = proc->optr;
+    }
+    else
+    {
+        proc->parent->cptr = proc->optr;
+    }
+    nr_process--;
 }
 
 // get_pid - alloc a unique pid for process
@@ -142,6 +197,10 @@ get_pid(void)
 }
 
 
+
+
+
+
 // forkret -- the first kernel entry point of a new thread/process
 // NOTE: the addr of forkret is setted in copy_thread function
 //       after switch_to, the current proc will execute here.
@@ -156,6 +215,13 @@ static void
 hash_proc(struct proc_struct *proc)
 {
     list_add(hash_list + pid_hashfn(proc->pid), &(proc->hash_link));
+}
+
+// unhash_proc - delete proc from proc hash_list
+static void
+unhash_proc(struct proc_struct *proc)
+{
+    list_del(&(proc->hash_link));
 }
 
 // find_proc - find proc frome proc hash_list according to pid
@@ -175,6 +241,19 @@ find_proc(int pid)
         }
     }
     return NULL;
+}
+
+//lab5 function2 YOUR CODE update kernel_thread
+int
+kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags)
+{
+    struct trapframe tf;
+    memset(&tf, 0, sizeof(tf));
+    tf.gpr.s0 = (uintptr_t)fn;
+    tf.gpr.s1 = (uintptr_t)arg;
+    tf.status = (read_csr(sstatus) | SSTATUS_SPP | SSTATUS_SPIE) & ~SSTATUS_SIE;
+    tf.epc = (uintptr_t)kernel_thread_entry;
+    return do_fork(clone_flags | CLONE_VM, 0, &tf);
 }
 
 
@@ -198,43 +277,30 @@ put_kstack(struct proc_struct *proc)
     free_pages(kva2page((void *)(proc->kstack)), KSTACKPAGE);
 }
 
-
-// do_exit - called by sys_exit
-//   1. call exit_mmap & put_pgdir & mm_destroy to free the almost all memory space of process
-//   2. set process' state as PROC_ZOMBIE, then call wakeup_proc(parent) to ask parent reclaim itself.
-//   3. call scheduler to switch to other process
-int do_exit(int error_code)
-{
-    panic("process exit!!.\n");
-}
-
-// init_main - the second kernel thread used to create user_main kernel threads
+// setup_pgdir - alloc one page as PDT
 static int
-init_main(void *arg)
+setup_pgdir(struct mm_struct *mm)
 {
-    cprintf("this initproc, pid = %d, name = \"%s\"\n", current->pid, get_proc_name(current));
-    cprintf("To U: \"%s\".\n", (const char *)arg);
-    cprintf("To U: \"en.., Bye, Bye. :)\"\n");
+    struct Page *page;
+    if ((page = alloc_page()) == NULL)
+    {
+        return -E_NO_MEM;
+    }
+    pde_t *pgdir = page2kva(page);
+    memcpy(pgdir, boot_pgdir_va, PGSIZE);
+
+    mm->pgdir = pgdir;
     return 0;
 }
 
-//LAB4 function2 YOUR CODE
-static struct proc_struct *
-alloc_proc(void)
+// put_pgdir - free the memory space of PDT
+static void
+put_pgdir(struct mm_struct *mm)
 {
-    struct proc_struct *proc = kmalloc(sizeof(struct proc_struct));
-    if (proc != NULL)
-    {
-        memset(proc, 0, sizeof(struct proc_struct));
-        proc->state = PROC_UNINIT;
-        proc->pid = -1;
-        proc->pgdir = boot_pgdir_pa;
-        list_init(&proc->list_link);
-        list_init(&proc->hash_link);
-    }
-    return proc;
+    free_page(kva2page(mm->pgdir));
 }
 
+//lab5 function3 YOUR CODE update copy_mm
 static int
 copy_mm(uint32_t clone_flags, struct proc_struct *proc)
 {
@@ -246,6 +312,9 @@ copy_mm(uint32_t clone_flags, struct proc_struct *proc)
     return 0;
 }
 
+
+
+//lab5 function2 YOUR CODE
 static void
 copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf)
 {
@@ -257,6 +326,8 @@ copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf)
     proc->context.sp = (uintptr_t)proc->tf;
 }
 
+
+//lab5 function3 YOUR CODE
 int
 do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
 {
@@ -304,16 +375,46 @@ bad_fork_cleanup_proc:
     return ret;
 }
 
-int
-kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags)
+
+//lab5 function4 YOUR CODE
+
+
+#define __KERNEL_EXECVE(name, binary, size) ({           \
+    cprintf("kernel_execve: pid = %d, name = \"%s\".\n", \
+            current->pid, name);                         \
+    kernel_execve(name, binary, (size_t)(size));         \
+})
+
+#define KERNEL_EXECVE(x) ({                                    \
+    extern unsigned char _binary_obj___user_##x##_out_start[], \
+        _binary_obj___user_##x##_out_size[];                   \
+    __KERNEL_EXECVE(#x, _binary_obj___user_##x##_out_start,    \
+                    _binary_obj___user_##x##_out_size);        \
+})
+
+#define __KERNEL_EXECVE2(x, xstart, xsize) ({   \
+    extern unsigned char xstart[], xsize[];     \
+    __KERNEL_EXECVE(#x, xstart, (size_t)xsize); \
+})
+
+#define KERNEL_EXECVE2(x, xstart, xsize) __KERNEL_EXECVE2(x, xstart, xsize)
+
+
+//lab5 function2 YOUR CODE
+void
+proc_run(struct proc_struct *proc)
 {
-    struct trapframe tf;
-    memset(&tf, 0, sizeof(tf));
-    tf.gpr.s0 = (uintptr_t)fn;
-    tf.gpr.s1 = (uintptr_t)arg;
-    tf.status = (read_csr(sstatus) | SSTATUS_SPP | SSTATUS_SPIE) & ~SSTATUS_SIE;
-    tf.epc = (uintptr_t)kernel_thread_entry;
-    return do_fork(clone_flags | CLONE_VM, 0, &tf);
+    if (proc != current)
+    {
+        bool intr_flag;
+        local_intr_save(intr_flag);
+        struct proc_struct *prev = current;
+        current = proc;
+        write_csr(satp, ((uintptr_t)8 << 60) | (proc->pgdir >> RISCV_PGSHIFT));
+        flush_tlb();
+        switch_to(&prev->context, &proc->context);
+        local_intr_restore(intr_flag);
+    }
 }
 
 void
@@ -335,36 +436,6 @@ proc_init(void)
     set_proc_name(idleproc, "idle");
     nr_process++;
     current = idleproc;
-
-    int pid = kernel_thread(init_main, "Hello world!!", 0);
-    if (pid <= 0)
-    {
-        panic("cannot create initproc: %d.\n", pid);
-    }
-    initproc = find_proc(pid);
-    assert(initproc != NULL && initproc->pid == 1);
-    set_proc_name(initproc, "init");
-}
-
-
-//LAB4 function3 2411302
-// Switch address space and the callee-saved execution context atomically.
-void
-proc_run(struct proc_struct *proc)
-{
-    if (proc != current)
-    {
-        bool intr_flag;
-        local_intr_save(intr_flag);
-        struct proc_struct *prev = current;
-        current = proc;
-        // pgdir stores a physical address; RV64 Sv39 uses MODE = 8.
-        write_csr(satp, ((uintptr_t)8 << 60) | (proc->pgdir >> RISCV_PGSHIFT));
-        flush_tlb();
-        switch_to(&prev->context, &proc->context);
-        // Reached when this process is selected again, on its own stack.
-        local_intr_restore(intr_flag);
-    }
 }
 
 void
@@ -378,3 +449,6 @@ cpu_idle(void)
         }
     }
 }
+
+
+

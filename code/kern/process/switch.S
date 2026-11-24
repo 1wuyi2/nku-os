@@ -1,13 +1,11 @@
 #include <riscv.h>
 
-//LAB4 function3 2411302
+//lab4 请补充你在lab4中的代码
 .text
 .align 2
 .globl switch_to
 .type switch_to, @function
 switch_to:
-    # a0 = outgoing context, a1 = incoming context.
-    # Match struct context: ra, sp, s0 through s11.
     STORE ra, 0*REGBYTES(a0)
     STORE sp, 1*REGBYTES(a0)
     STORE s0, 2*REGBYTES(a0)
