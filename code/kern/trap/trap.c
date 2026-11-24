@@ -142,10 +142,15 @@ void interrupt_handler(struct trapframe *tf)
 }
 
 //lab5 function1 YOUR CODE update exception_handler
+// 2412771-谭锦睿
 void exception_handler(struct trapframe *tf)
 {
     switch (tf->cause)
     {
+    case CAUSE_USER_ECALL:
+        tf->epc += 4;
+        syscall();
+        return;
     case CAUSE_ILLEGAL_INSTRUCTION:
         cprintf("Illegal instruction at 0x%016lx\n", (unsigned long)tf->epc);
         break;

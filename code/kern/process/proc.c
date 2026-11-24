@@ -81,10 +81,15 @@ static int nr_process = 0;
 void kernel_thread_entry(void);
 void forkrets(struct trapframe *tf);
 void switch_to(struct context *from, struct context *to);
+static int init_main(void *arg);
+static int user_main(void *arg);
+static int kernel_execve(const char *name, unsigned char *binary, size_t size);
+static int load_icode(unsigned char *binary, size_t size);
 
 //lab4 请补充你在lab4中的代码
 
 //lab5 function2 YOUR CODE update alloc_proc
+// 2412771-谭锦睿
 static struct proc_struct *
 alloc_proc(void)
 {
@@ -94,7 +99,17 @@ alloc_proc(void)
         memset(proc, 0, sizeof(struct proc_struct));
         proc->state = PROC_UNINIT;
         proc->pid = -1;
+        proc->runs = 0;
+        proc->kstack = 0;
+        proc->need_resched = 0;
+        proc->parent = NULL;
+        proc->mm = NULL;
+        proc->tf = NULL;
         proc->pgdir = boot_pgdir_pa;
+        proc->flags = 0;
+        proc->exit_code = 0;
+        proc->wait_state = 0;
+        proc->cptr = proc->yptr = proc->optr = NULL;
         list_init(&proc->list_link);
         list_init(&proc->hash_link);
     }
@@ -244,6 +259,7 @@ find_proc(int pid)
 }
 
 //lab5 function2 YOUR CODE update kernel_thread
+// 2412771-谭锦睿
 int
 kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags)
 {
@@ -400,6 +416,332 @@ bad_fork_cleanup_proc:
 #define KERNEL_EXECVE2(x, xstart, xsize) __KERNEL_EXECVE2(x, xstart, xsize)
 
 
+// 2412771-谭锦睿: Lab5 Function 2
+static int
+kernel_execve(const char *name, unsigned char *binary, size_t size)
+{
+    int ret = do_execve(name, strlen(name), binary, size);
+    if (ret == 0)
+    {
+        forkrets(current->tf);
+    }
+    return ret;
+}
+
+static int
+user_main(void *arg)
+{
+#ifdef TEST
+    return KERNEL_EXECVE2(TEST, TESTSTART, TESTSIZE);
+#else
+    return KERNEL_EXECVE(hello);
+#endif
+}
+
+static int
+init_main(void *arg)
+{
+    int pid = kernel_thread(user_main, NULL, 0);
+    if (pid <= 0)
+    {
+        panic("create user_main failed.\n");
+    }
+
+    while (do_wait(0, NULL) == 0)
+    {
+        /* Reap every user process adopted by initproc. */
+    }
+    cprintf("all user-mode processes have quit.\n");
+    cprintf("init check memory pass.\n");
+    return 0;
+}
+
+int
+do_execve(const char *name, size_t len, unsigned char *binary, size_t size)
+{
+    struct mm_struct *mm = current->mm;
+    unsigned char *binary_copy = NULL;
+    char local_name[PROC_NAME_LEN + 1];
+    int ret;
+
+    if (len > PROC_NAME_LEN)
+    {
+        len = PROC_NAME_LEN;
+    }
+    if (len == 0 || size == 0 ||
+        !user_mem_check(mm, (uintptr_t)name, len, 0) ||
+        !user_mem_check(mm, (uintptr_t)binary, size, 0))
+    {
+        return -E_INVAL;
+    }
+
+    memset(local_name, 0, sizeof(local_name));
+    if (!copy_from_user(mm, local_name, name, len, 0))
+    {
+        return -E_INVAL;
+    }
+
+    if (mm != NULL)
+    {
+        if ((binary_copy = kmalloc(size)) == NULL)
+        {
+            return -E_NO_MEM;
+        }
+        if (!copy_from_user(mm, binary_copy, binary, size, 0))
+        {
+            kfree(binary_copy);
+            return -E_INVAL;
+        }
+        binary = binary_copy;
+
+        write_csr(satp, ((uintptr_t)8 << 60) | (boot_pgdir_pa >> RISCV_PGSHIFT));
+        flush_tlb();
+        current->mm = NULL;
+        current->pgdir = boot_pgdir_pa;
+        if (mm_count_dec(mm) == 0)
+        {
+            exit_mmap(mm);
+            put_pgdir(mm);
+            mm_destroy(mm);
+        }
+    }
+
+    ret = load_icode(binary, size);
+    if (binary_copy != NULL)
+    {
+        kfree(binary_copy);
+    }
+    if (ret != 0)
+    {
+        do_exit(ret);
+        return ret;
+    }
+    set_proc_name(current, local_name);
+    return 0;
+}
+
+static int
+load_icode(unsigned char *binary, size_t size)
+{
+    struct mm_struct *mm;
+    struct elfhdr *elf;
+    struct proghdr *ph;
+    struct trapframe *tf = current->tf;
+    int ret = -E_NO_MEM;
+
+    if ((mm = mm_create()) == NULL)
+    {
+        return ret;
+    }
+    if ((ret = setup_pgdir(mm)) != 0)
+    {
+        goto bad_mm;
+    }
+
+    ret = -E_INVAL_ELF;
+    if (size < sizeof(struct elfhdr))
+    {
+        goto bad_cleanup_mmap;
+    }
+    elf = (struct elfhdr *)binary;
+    if (elf->e_magic != ELF_MAGIC ||
+        elf->e_phentsize != sizeof(struct proghdr) ||
+        elf->e_phoff > size ||
+        elf->e_phnum > (size - elf->e_phoff) / sizeof(struct proghdr) ||
+        elf->e_entry < USERBASE || elf->e_entry >= USERTOP)
+    {
+        goto bad_cleanup_mmap;
+    }
+
+    ph = (struct proghdr *)(binary + elf->e_phoff);
+    for (int i = 0; i < elf->e_phnum; i++, ph++)
+    {
+        if (ph->p_type != ELF_PT_LOAD)
+        {
+            continue;
+        }
+        if (ph->p_filesz > ph->p_memsz ||
+            ph->p_offset > size || ph->p_filesz > size - ph->p_offset ||
+            ph->p_va < USERBASE || ph->p_va >= USERTOP ||
+            ph->p_memsz > USERTOP - ph->p_va)
+        {
+            goto bad_cleanup_mmap;
+        }
+        if (ph->p_memsz == 0)
+        {
+            continue;
+        }
+
+        uint32_t vm_flags = 0, perm = PTE_U;
+        if (ph->p_flags & ELF_PF_R)
+        {
+            vm_flags |= VM_READ;
+            perm |= PTE_R;
+        }
+        if (ph->p_flags & ELF_PF_W)
+        {
+            vm_flags |= VM_WRITE;
+            perm |= PTE_W;
+        }
+        if (ph->p_flags & ELF_PF_X)
+        {
+            vm_flags |= VM_EXEC;
+            perm |= PTE_X;
+        }
+
+        if ((ret = mm_map(mm, (uintptr_t)ph->p_va, (size_t)ph->p_memsz,
+                          vm_flags, NULL)) != 0)
+        {
+            goto bad_cleanup_mmap;
+        }
+
+        uintptr_t seg_start = (uintptr_t)ph->p_va;
+        uintptr_t seg_end = seg_start + (uintptr_t)ph->p_memsz;
+        uintptr_t file_end = seg_start + (uintptr_t)ph->p_filesz;
+        uintptr_t la = ROUNDDOWN(seg_start, PGSIZE);
+
+        while (la < seg_end)
+        {
+            struct Page *page = pgdir_alloc_page(mm->pgdir, la, perm);
+            if (page == NULL)
+            {
+                ret = -E_NO_MEM;
+                goto bad_cleanup_mmap;
+            }
+            unsigned char *page_kva = page2kva(page);
+            memset(page_kva, 0, PGSIZE);
+
+            uintptr_t copy_start = la > seg_start ? la : seg_start;
+            uintptr_t page_end = la + PGSIZE;
+            uintptr_t copy_end = page_end < file_end ? page_end : file_end;
+            if (copy_start < copy_end)
+            {
+                memcpy(page_kva + (copy_start - la),
+                       binary + ph->p_offset + (copy_start - seg_start),
+                       copy_end - copy_start);
+            }
+            la += PGSIZE;
+        }
+    }
+
+    struct vma_struct *entry_vma = find_vma(mm, (uintptr_t)elf->e_entry);
+    if (entry_vma == NULL || !(entry_vma->vm_flags & VM_EXEC))
+    {
+        ret = -E_INVAL_ELF;
+        goto bad_cleanup_mmap;
+    }
+
+    if ((ret = mm_map(mm, USTACKTOP - USTACKSIZE, USTACKSIZE,
+                      VM_READ | VM_WRITE | VM_STACK, NULL)) != 0)
+    {
+        goto bad_cleanup_mmap;
+    }
+    for (int i = 1; i <= 4; i++)
+    {
+        struct Page *page = pgdir_alloc_page(mm->pgdir, USTACKTOP - i * PGSIZE,
+                                             PTE_U | PTE_R | PTE_W);
+        if (page == NULL)
+        {
+            ret = -E_NO_MEM;
+            goto bad_cleanup_mmap;
+        }
+        memset(page2kva(page), 0, PGSIZE);
+    }
+
+    mm_count_inc(mm);
+    current->mm = mm;
+    current->pgdir = PADDR(mm->pgdir);
+    write_csr(satp, ((uintptr_t)8 << 60) | (current->pgdir >> RISCV_PGSHIFT));
+    flush_tlb();
+
+    memset(tf, 0, sizeof(struct trapframe));
+    tf->gpr.sp = USTACKTOP;
+    tf->epc = (uintptr_t)elf->e_entry;
+    tf->status = (read_csr(sstatus) | SSTATUS_SPIE) &
+                 ~(SSTATUS_SPP | SSTATUS_SIE);
+    return 0;
+
+bad_cleanup_mmap:
+    exit_mmap(mm);
+    put_pgdir(mm);
+bad_mm:
+    mm_destroy(mm);
+    return ret;
+}
+
+int
+do_wait(int pid, int *code_store)
+{
+    struct proc_struct *proc;
+    bool intr_flag, haskid;
+
+    if (code_store != NULL &&
+        !user_mem_check(current->mm, (uintptr_t)code_store, sizeof(int), 1))
+    {
+        return -E_INVAL;
+    }
+
+repeat:
+    haskid = 0;
+    if (pid != 0)
+    {
+        proc = find_proc(pid);
+        if (proc != NULL && proc->parent == current)
+        {
+            haskid = 1;
+            if (proc->state == PROC_ZOMBIE)
+            {
+                goto found;
+            }
+        }
+    }
+    else
+    {
+        proc = current->cptr;
+        for (; proc != NULL; proc = proc->optr)
+        {
+            haskid = 1;
+            if (proc->state == PROC_ZOMBIE)
+            {
+                goto found;
+            }
+        }
+    }
+
+    if (haskid)
+    {
+        current->state = PROC_SLEEPING;
+        current->wait_state = WT_CHILD;
+        schedule();
+        if (current->flags & PF_EXITING)
+        {
+            return do_exit(-E_KILLED);
+        }
+        goto repeat;
+    }
+    return -E_BAD_PROC;
+
+found:
+    if (proc == idleproc || proc == initproc)
+    {
+        panic("wait idleproc or initproc.\n");
+    }
+    if (code_store != NULL)
+    {
+        *code_store = proc->exit_code;
+    }
+
+    local_intr_save(intr_flag);
+    unhash_proc(proc);
+    remove_links(proc);
+    local_intr_restore(intr_flag);
+
+    put_kstack(proc);
+    kfree(proc);
+    return 0;
+}
+
+
 //lab5 function2 YOUR CODE
 void
 proc_run(struct proc_struct *proc)
@@ -436,6 +778,13 @@ proc_init(void)
     set_proc_name(idleproc, "idle");
     nr_process++;
     current = idleproc;
+
+    int pid = kernel_thread(init_main, NULL, 0);
+    if (pid <= 0 || (initproc = find_proc(pid)) == NULL)
+    {
+        panic("create initproc failed.\n");
+    }
+    set_proc_name(initproc, "init");
 }
 
 void

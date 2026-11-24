@@ -37,11 +37,11 @@
 - [x] 建立 Lab5 分支并导入实验代码
 - [x] 补全 Lab2 / Lab3 / Lab4 前序依赖
 - [x] 修改 `RESTORE_ALL`，支持用户态 / 内核态双向异常返回
-- [ ] 功能模块一：用户态系统调用
-- [ ] 功能模块二：创建并加载第一个用户进程
+- [x] 功能模块一：用户态系统调用
+- [x] 功能模块二：创建并加载第一个用户进程
 - [ ] 功能模块三：复制用户进程
 - [ ] 功能模块四：进程退出、让出与终止
-- [ ] 用户程序预加载方式分析
+- [x] 用户程序预加载方式分析
 - [ ] Copy on Write / Dirty COW
 - [ ] GDB 系统调用调试
 - [ ] 完成实验代码整合
@@ -392,9 +392,26 @@ a1 ~ a5
 
 ### 4.1.3 实现过程
 
-待功能完成后补充。
+实现前先核对了当前工程的 `trapframe` 布局、用户库系统调用封装和 `do_xxx()` 声明。`user/libs/syscall.c` 使用 `a0` 传递系统调用号，使用 `a1` 至 `a5` 传递最多五个参数，并从 `a0` 取回返回值。
 
-重点分析：
+`exception_handler()` 遇到 `CAUSE_USER_ECALL` 时，先将 `epc` 增加 4，再调用 `syscall()`。RISC-V 的 `ecall` 为 4 字节指令，因此返回用户态后会从其下一条指令继续执行。非法指令和断点原有的变长指令推进逻辑保持不变。
+
+`syscall()` 从 `current->tf` 取得 TrapFrame，读取 `a0`，并将 `a1` 至 `a5` 保存为参数数组。只有系统调用号在分发表范围内且对应函数指针非空时才调用 `sys_xxx()`；否则按当前 Lab5 测试约定返回 `-E_INVAL`。最终结果写回 `tf->gpr.a0`。
+
+各包装函数的实际参数传递为：
+
+- `sys_exit(error_code)` 调用 `do_exit(error_code)`；
+- `sys_fork()` 调用 `do_fork(0, current->tf->gpr.sp, current->tf)`；
+- `sys_wait(pid, code_store)` 检查非空的可写 `code_store` 后调用 `do_wait()`；
+- `sys_exec(name, len, binary, size)` 检查名称和程序数据的可读区间后调用 `do_execve()`；
+- `sys_yield()` 和 `sys_kill(pid)` 分别调用 `do_yield()` 和 `do_kill()`；
+- `sys_getpid()` 返回 `current->pid`；
+- `sys_putc(c)` 调用 `cputchar(c)`；
+- `sys_pgdir()` 调用工程已声明的 `print_pgdir()`。
+
+当前 `user/libs/syscall.c` 尚没有 `SYS_exec` 的用户封装；Function 1 按当前 `do_execve(const char *, size_t, unsigned char *, size_t)` 的真实声明完成了 `a1` 至 `a4` 的内核分发布局，未越界实现 Function 2 的 `kernel_execve()` 或 `do_execve()`。
+
+整体调用链为：
 
 ```text
 用户程序
@@ -424,7 +441,25 @@ syscall()
 
 ### 4.1.4 关键代码
 
-待实现后补充。
+用户态 `ecall` 分支的关键点是单独处理并立即返回，避免再进入非法指令和断点使用的指令长度判定：
+
+```c
+case CAUSE_USER_ECALL:
+    tf->epc += 4;
+    syscall();
+    return;
+```
+
+分发器依次检查范围和函数指针，并把返回值写回 `a0`：
+
+```c
+if (num < NUM_SYSCALLS && syscalls[num] != NULL) {
+    tf->gpr.a0 = syscalls[num](arg);
+}
+else {
+    tf->gpr.a0 = -E_INVAL;
+}
+```
 
 ---
 
@@ -440,19 +475,17 @@ report/prompt.md
 
 ### 4.1.6 测试与验证
 
-待功能完成后补充。
+实际执行了：
 
-重点检查：
-
-```text
-ecall 是否能够进入内核
-系统调用号是否能够正确读取
-参数是否能够正确传递
-epc 是否正确推进
-系统调用是否能够正确分发
-返回值是否能够返回用户程序
-系统调用完成后能否返回用户态
+```bash
+cd ~/os-lab/nku-os/code
+make clean
+make -j4
 ```
+
+`kern/trap/trap.c` 和 `kern/syscall/syscall.c` 均成功编译，所有用户库与用户测试程序也已编译。最终内核链接失败，未定义符号为 `do_execve`、`do_wait`、`do_exit`、`do_yield`、`do_kill` 和 `print_pgdir`。前五个分别属于尚未完成的 Function 2 和 Function 4；`print_pgdir()` 已在 `pmm.h` 中声明，但当前 starter 没有函数定义。本轮未为通过链接而越界增加临时实现。
+
+`git diff --check` 实际执行时无输出，未发现空白错误。由于完整内核未能链接，本轮未运行 QEMU 和 grade，也未将它们记录为通过。
 
 ---
 
@@ -576,9 +609,9 @@ kernel_thread()
 init_main()
 ```
 
-其后需要进一步创建和管理用户程序。
+实现中，`proc_init()` 通过 `kernel_thread(init_main, NULL, 0)` 创建 PID 1，再通过 `find_proc()` 设置 `initproc` 并命名为 `init`。`init_main()` 继续创建执行 `user_main()` 的内核线程，并用 `do_wait(0, NULL)` 回收子进程。
 
-待功能完成后结合实际代码补充。
+当前 `do_fork()` 中的 Lab5 父子链更新属于 Function 3，因此完整等待链仍依赖 Function 3 将新进程接入 `cptr/yptr/optr`。
 
 ---
 
@@ -598,7 +631,7 @@ user_main()
 kernel_execve()
 ```
 
-待实现后补充实际过程。
+`user_main()` 使用 starter 提供的用户程序嵌入符号。普通构建时执行 `KERNEL_EXECVE(hello)`；grade 通过 `TEST`、`TESTSTART` 和 `TESTSIZE` 指定程序时，执行 `KERNEL_EXECVE2(TEST, TESTSTART, TESTSIZE)`。本轮没有创建额外用户程序。
 
 ---
 
@@ -616,9 +649,7 @@ exec
 用户程序执行流
 ```
 
-并与 TrapFrame 和用户态返回机制配合。
-
-待实现后补充。
+实现中先调用 `do_execve()`。装载成功后不作普通 C 函数返回，而是调用 `forkrets(current->tf)` 进入现有 `__trapret`。`RESTORE_ALL` 恢复新的用户 TrapFrame，再由 `sret` 首次进入 U Mode。
 
 ---
 
@@ -638,9 +669,9 @@ exec
 建立新的执行现场
 ```
 
-进程本身仍然存在，但运行的程序被替换。
+进程本身仍然存在，但运行的程序被替换。`do_execve()` 先校验并复制进程名。对已有用户地址空间的调用者，先将 ELF 复制到内核缓冲区，避免释放旧页表后访问失效用户指针。
 
-待实现后补充。
+随后切换至 `boot_pgdir`，通过 `mm_count_dec()`、`exit_mmap()`、`put_pgdir()` 和 `mm_destroy()` 释放不再共享的旧地址空间，再调用 `load_icode()`。若旧空间已释放后装载失败，则调用 Function 4 的 `do_exit()`。
 
 ---
 
@@ -694,6 +725,12 @@ PTE_W
 PTE_X
 ```
 
+实现先检查 ELF 头、Program Header 大小与边界、入口地址，然后遍历 `ELF_PT_LOAD` 段。`ELF_PF_R/W/X` 分别转换为 `VM_READ/WRITE/EXEC` 和 `PTE_R/W/X`，所有用户映射增加 `PTE_U`。
+
+装载从 `ROUNDDOWN(p_va, PGSIZE)` 起逐页分配，每页先清零，再只复制与 `[p_va, p_va+p_filesz)` 相交的部分，因此可处理非页对齐地址、跨页数据和 `p_memsz > p_filesz` 的 BSS。
+
+用户栈 VMA 使用 `[USTACKTOP-USTACKSIZE, USTACKTOP)`，并在栈顶初始分配 4 个可读写用户页。完成后设置 `current->mm/current->pgdir`，更新 `satp` 并刷新 TLB。
+
 ---
 
 ### 4.2.8 第一次进入用户态
@@ -724,6 +761,8 @@ sstatus
 
 等状态。
 
+实际 TrapFrame 整体清零，`epc` 设为 ELF `e_entry`，`sp` 设为 `USTACKTOP`，`sstatus` 清除 `SSTATUS_SPP` 和 `SSTATUS_SIE`、置位 `SSTATUS_SPIE`。这与当前 `RESTORE_ALL` 通过 `SPP` 判断用户返回并设置 `sscratch` 的逻辑一致。
+
 ---
 
 ### 4.2.9 `do_wait()`
@@ -745,7 +784,9 @@ sstatus
 → schedule()
 ```
 
-待功能完成后补充实际处理过程。
+`do_wait()` 先检查非空 `code_store` 是否为可写用户区间。`pid != 0` 时只接受属于当前进程的指定子进程；`pid == 0` 时沿 `cptr/optr` 查找任意子进程。
+
+对 `PROC_ZOMBIE` 子进程，先取退出码，在关中断区间用 `unhash_proc()` 和 `remove_links()` 移除进程，再用 `put_kstack()` 和 `kfree()` 回收资源。如果子进程仍在运行，父进程进入 `PROC_SLEEPING/WT_CHILD` 并调用 `schedule()`，醒来后重新检查。
 
 ---
 
@@ -770,13 +811,31 @@ sstatus
 
 ### 4.2.11 实现过程
 
-待功能完成后补充。
+先扫描所有 Function 2 标记，保留 Lab4 已有的内核线程、`copy_thread()` 和 `proc_run()` 基础。`alloc_proc()` 显式初始化 Lab5 父子关系与等待字段。`kernel_thread()` 继续设置 `SPP=1`，保证普通内核线程返回 S Mode。
+
+随后完成 `init_main/user_main/kernel_execve/do_execve/load_icode/do_wait`，并在 `proc_init()` 中创建 `initproc`。没有修改 Function 3 的 `do_fork/copy_mm/dup_mmap/copy_range`，也没有实现 Function 4 主体。
 
 ---
 
 ### 4.2.12 关键代码
 
-待功能完成后补充。
+进入统一 Trap 返回路径：
+
+```c
+int ret = do_execve(name, strlen(name), binary, size);
+if (ret == 0) {
+    forkrets(current->tf);
+}
+```
+
+用户态 TrapFrame 的关键状态：
+
+```c
+tf->gpr.sp = USTACKTOP;
+tf->epc = (uintptr_t)elf->e_entry;
+tf->status = (read_csr(sstatus) | SSTATUS_SPIE) &
+             ~(SSTATUS_SPP | SSTATUS_SIE);
+```
 
 ---
 
@@ -792,22 +851,17 @@ report/prompt.md
 
 ### 4.2.14 测试与验证
 
-待功能完成后补充。
+实际先执行 `make obj/kern/process/proc.o`，`proc.c` 单文件编译通过。随后执行：
 
-重点检查：
-
-```text
-init_main 是否能够正常执行
-user_main 是否能够正常建立
-用户 ELF 是否能够正确加载
-mm_struct 是否建立正确
-VMA 是否正确建立
-用户页表是否正确
-用户栈是否正确
-TrapFrame 是否正确
-是否能够第一次进入 U Mode
-用户程序是否能够开始执行
+```bash
+cd ~/os-lab/nku-os/code
+make clean
+make -j4
 ```
+
+Function 2、Function 1、用户库和全部用户程序均成功编译。最终链接阶段已不再报告 `do_execve()` 或 `do_wait()` 缺失，但仍因 Function 4 未完成的 `do_exit()`、`do_yield()`、`do_kill()` 和 starter 仅声明未定义的 `print_pgdir()` 而失败。
+
+因内核未能链接，本轮没有运行 QEMU 或 grade，也没有修改 Function 3/4 或增加临时桩强行通过。
 
 ---
 
@@ -989,35 +1043,112 @@ report/prompt.md
 
 **负责人：2412771-谭锦睿**
 
-需要分析：
+在完成 Function 2 的过程中，我注意到 Lab5 中的用户程序并不是等系统启动以后再从磁盘读取，而是在编译内核时就已经提前放进了内核镜像中。
+
+例如 `user_main()` 中可以通过：
 
 ```text
-用户程序是在什么时候进入内核镜像的？
-
-Lab5 中内核如何取得用户程序内容？
-
-用户程序又是在什么时候真正被加载到自己的用户地址空间？
-
-这种方式与普通操作系统从文件系统加载程序有什么不同？
-
-为什么教学实验采用这种方式？
+KERNEL_EXECVE(hello)
 ```
 
-主要结合：
+直接取得 `hello` 用户程序对应的数据，然后交给：
 
 ```text
-用户程序编译过程
-Makefile
-链接过程
-用户程序二进制
 kernel_execve()
+    ↓
 do_execve()
+    ↓
 load_icode()
 ```
 
-进行分析。
+继续处理。
 
-待分析完成后补充。
+结合 Makefile 可以看出，`user/` 目录下的程序会先被编译成独立的 ELF 文件，之后在链接内核时作为二进制数据一起放进最终的 kernel 中。
+
+所以这里需要区分两个过程：
+
+```text
+编译阶段
+用户 ELF 被放进内核镜像
+
+运行阶段
+load_icode() 再把这个 ELF
+真正加载到用户进程地址空间
+```
+
+也就是说，“预加载”并不是说用户程序一开始就已经位于自己的用户虚拟地址空间中，而只是它的 ELF 文件内容已经提前保存在内核镜像里。
+
+真正运行用户程序时，`load_icode()` 还需要重新解析 ELF，并完成：
+
+```text
+建立 mm_struct
+    ↓
+建立 VMA
+    ↓
+分配和映射物理页
+    ↓
+加载代码段和数据段
+    ↓
+处理 BSS
+    ↓
+建立用户栈
+    ↓
+构造 TrapFrame
+```
+
+之后才能通过：
+
+```text
+RESTORE_ALL
+    ↓
+sret
+```
+
+进入用户态执行。
+
+普通操作系统中的程序加载方式和这里不太一样。正常情况下，可执行程序一般保存在磁盘和文件系统中。执行程序时，内核需要先根据文件路径找到对应 ELF 文件，再从文件系统读取程序内容，然后建立地址空间并进行加载。
+
+可以简单比较为：
+
+```text
+Lab5：
+
+用户 ELF
+    ↓
+编译内核时提前嵌入 kernel
+    ↓
+运行时直接取得 ELF 数据
+    ↓
+load_icode()
+```
+
+而普通操作系统：
+
+```text
+可执行文件
+    ↓
+保存在文件系统
+    ↓
+exec 时查找并读取文件
+    ↓
+加载 ELF
+```
+
+我认为 Lab5 采用这种方式主要是因为当前实验还没有实现完整的文件系统。如果现在就按照普通操作系统的方式加载程序，还需要先完成磁盘、文件查找和文件读取等内容，会让本实验依赖后面的文件系统功能。
+
+因此这里先把用户程序提前放进内核镜像，就可以把实验重点放在：
+
+```text
+用户进程创建
+ELF 加载
+用户地址空间建立
+用户态切换
+系统调用
+```
+
+这些 Lab5 本身需要学习的内容上。
+
+通过这部分分析，我对“用户程序已经在内核镜像中”和“用户程序已经加载到用户地址空间中”这两个概念的区别更加清楚。前者发生在编译链接阶段，后者才真正发生在运行时的 `load_icode()` 中。
 
 ---
 
@@ -1274,7 +1405,13 @@ Total Score：
 
 ### 用户程序预加载分析
 
-待完成后填写。
+结合本实验的 Makefile、`user_main()`、`KERNEL_EXECVE`、`kernel_execve()` 和 `load_icode()`，确认了 Lab5 中用户程序的基本加载方式。
+
+用户程序首先在编译阶段生成 ELF，并在链接内核时作为二进制数据放进 kernel。系统运行后，`user_main()` 通过 `KERNEL_EXECVE` 取得对应程序的数据，再由 `kernel_execve()`、`do_execve()` 和 `load_icode()` 建立真正的用户地址空间并加载程序。
+
+因此 Lab5 中“用户程序提前进入内核镜像”和“程序真正进入用户地址空间”是两个不同阶段。
+
+和普通操作系统相比，本实验省略了从文件系统查找和读取 ELF 的步骤，主要是为了在还没有实现完整文件系统的情况下，先学习用户进程、ELF 加载和用户态切换机制。
 
 ### Copy on Write / Dirty COW
 
