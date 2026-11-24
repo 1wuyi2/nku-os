@@ -1,3 +1,5 @@
+# 2412771-谭锦睿 AI Prompt 记录
+
 ## Lab5 Function 1
 
 [PROMPT]
@@ -155,3 +157,74 @@ sret
 8. 区分 Function 2 自身问题与 Function 3 / 4 尚未完成造成的问题；
 9. 根据真实实现和测试结果更新本人 `report.md`；
 10. 记录 Function 2 的真实完成和测试状态。
+
+---
+
+# 2413581-黄奕浩 AI Prompt 记录
+
+## Lab5 Function 3
+
+[PROMPT]
+
+完成本人负责的 Lab5 Function 3，实现用户进程复制。
+
+主要完成：
+
+- 更新 `do_fork()` 和 `copy_mm()`
+- 完成 `dup_mmap()` 和 `copy_range()`
+- 正确建立子进程的 PCB、内核栈、TrapFrame、PID 及父子关系
+- 区分内核线程、`CLONE_VM` 和普通 fork，处理失败时的资源回收
+- 完成 COW 拓展，接入用户态写缺页和内核向用户空间的写入，并验证跨页写入失败时目标数据保持原值
+- 说明 Dirty COW 的原理，记录状态模型与 uCore 的保护测试
+
+完成后根据真实实现和测试结果补充 `report.md`。
+
+[RELY]
+
+主要依据当前 `lab5` 工作区：
+
+- `code/kern/process/proc.c`
+- `code/kern/process/proc.h`
+- `code/kern/mm/vmm.c`
+- `code/kern/mm/vmm.h`
+- `code/kern/mm/pmm.c`
+- `code/kern/mm/mmu.h`
+- `code/kern/trap/trap.c`
+- `code/kern/syscall/syscall.c`
+- 当前 `proc_struct`、`mm_struct`、`vma_struct`、TrapFrame 和页表接口
+
+整体调用关系：
+
+```text
+sys_fork()
+    ↓
+do_fork()
+    ↓
+copy_mm()
+    ↓
+dup_mmap()
+    ↓
+copy_range()
+```
+
+所有函数签名、页表权限位和引用计数规则均以当前 Lab5 实际代码为准。
+
+[GUARANTEE]
+
+- 实现 Function 3 与 COW 拓展，保留已合入的系统调用处理
+- 使用现有编译和评分入口，专项测试单独组织
+- 保留原实验注释，用学号 `2413581` 标识本人代码
+- 保持真正只读页的权限，按引用计数回收物理页
+- 测试结果在终端显示，测试副本自动清理
+- 根据实际运行结果填写报告
+
+[SPECIFICATION]
+
+最终完成：
+
+1. Lab5 版本的 `do_fork()` 和 `copy_mm()`，父进程得到子 PID，子进程的 a0 为 0。
+2. `dup_mmap()` 和 `copy_range()`，复制 VMA，支持逐页深复制与 COW 共享。
+3. `cow_resolve()`、Store Page Fault 和 `copy_to_user()`，实现共享页分离、独占页恢复写权限和 TLB 刷新。
+4. 跨页写入先准备所有目标页，再复制数据，并检查第二页未映射或分配失败后的数据。
+5. 执行编译和 QEMU 专项测试，检查真实 U 态写缺页、父子页隔离、只读保护和资源回收。
+6. 根据实际实现和测试结果更新本人 `report.md`，记录 COW 状态转换、Dirty COW 原理、状态模型和截图。

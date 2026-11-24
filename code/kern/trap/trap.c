@@ -151,6 +151,16 @@ void exception_handler(struct trapframe *tf)
         tf->epc += 4;
         syscall();
         return;
+    // Lab5 COW: retry the faulting store after fixing the mapping.
+    case CAUSE_STORE_PAGE_FAULT:
+        if (current != NULL && cow_resolve(current->mm, tf->tval) == 0)
+            return;
+        if (!(tf->status & SSTATUS_SPP))
+        {
+            do_exit(-E_FAULT);
+            return;
+        }
+        panic("unhandled supervisor store page fault at %016lx", tf->tval);
     case CAUSE_ILLEGAL_INSTRUCTION:
         cprintf("Illegal instruction at 0x%016lx\n", (unsigned long)tf->epc);
         break;

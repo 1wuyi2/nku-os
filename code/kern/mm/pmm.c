@@ -319,64 +319,88 @@ void exit_range(pde_t *pgdir, uintptr_t start, uintptr_t end)
     assert(start % PGSIZE == 0 && end % PGSIZE == 0);
     assert(USER_ACCESS(start, end));
 
-    uintptr_t d1start, d0start;
-    int free_pt, free_pd0;
-    pde_t *pd0, *pt, pde1, pde0;
-    d1start = ROUNDDOWN(start, PDSIZE);
-    d0start = ROUNDDOWN(start, PTSIZE);
-    do
+    uintptr_t va = ROUNDDOWN(start, PTSIZE);
+    while (va < end)
     {
-        // level 1 page directory entry
-        pde1 = pgdir[PDX1(d1start)];
-        // if there is a valid entry, get into level 0
-        // and try to free all page tables pointed to by
-        // all valid entries in level 0 page directory,
-        // then try to free this level 0 page directory
-        // and update level 1 entry
-        if (pde1 & PTE_V)
+        pde_t *root = &pgdir[PDX1(va)];
+        if (*root & PTE_V)
         {
-            pd0 = page2kva(pde2page(pde1));
-            // try to free all page tables
-            free_pd0 = 1;
-            do
+            pde_t *middle = KADDR(PDE_ADDR(*root));
+            pde_t *entry = &middle[PDX0(va)];
+            if (*entry & PTE_V)
             {
-                pde0 = pd0[PDX0(d0start)];
-                if (pde0 & PTE_V)
+                pte_t *table = KADDR(PDE_ADDR(*entry));
+                bool empty = 1;
+                for (int i = 0; i < NPTEENTRY; i++)
+                    if (table[i] != 0) empty = 0;
+                if (empty)
                 {
-                    pt = page2kva(pde2page(pde0));
-                    // try to free page table
-                    free_pt = 1;
-                    for (int i = 0; i < NPTEENTRY; i++)
-                        if (pt[i] & PTE_V)
-                        {
-                            free_pt = 0;
-                            break;
-                        }
-                    // free it only when all entry are already invalid
-                    if (free_pt)
-                    {
-                        free_page(pde2page(pde0));
-                        pd0[PDX0(d0start)] = 0;
-                    }
+                    free_page(pde2page(*entry));
+                    *entry = 0;
                 }
-                else
-                    free_pd0 = 0;
-                d0start += PTSIZE;
-            } while (d0start != 0 && d0start < d1start + PDSIZE && d0start < end);
-            // free level 0 page directory only when all pde0s in it are already invalid
-            if (free_pd0)
+            }
+            bool empty = 1;
+            for (int i = 0; i < NPTEENTRY; i++)
+                if (middle[i] != 0) empty = 0;
+            if (empty)
             {
-                free_page(pde2page(pde1));
-                pgdir[PDX1(d1start)] = 0;
+                free_page(pde2page(*root));
+                *root = 0;
             }
         }
-        d1start += PDSIZE;
-        d0start = d1start;
-    } while (d1start != 0 && d1start < end);
+        va += PTSIZE;
+    }
 }
 
 
-//lab5 function3 YOUR CODE 
+//lab5 function3 2413581
+int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share)
+{
+    assert(start % PGSIZE == 0 && end % PGSIZE == 0);
+    assert(USER_ACCESS(start, end));
+    while (start < end)
+    {
+        pte_t *src = get_pte(from, start, 0);
+        if (src == NULL)
+        {
+            start = ROUNDDOWN(start + PTSIZE, PTSIZE);
+            continue;
+        }
+        if (*src & PTE_V)
+        {
+            struct Page *page = pte2page(*src);
+            uint32_t perm = *src & 0x3ff;
+            int ret;
+            if (share)
+            {
+                if (perm & PTE_W)
+                    perm = (perm & ~PTE_W) | PTE_COW;
+                if ((ret = page_insert(to, page, start, perm)) != 0)
+                    return ret;
+                *src = pte_create(page2ppn(page), perm);
+                tlb_invalidate(from, start);
+            }
+            else
+            {
+                struct Page *copy = alloc_page();
+                if (copy == NULL)
+                    return -E_NO_MEM;
+                memcpy(page2kva(copy), page2kva(page), PGSIZE);
+                if (perm & PTE_COW)
+                    perm = (perm | PTE_W) & ~PTE_COW;
+                ret = page_insert(to, copy, start, perm);
+                if (ret != 0)
+                {
+                    free_page(copy);
+                    return ret;
+                }
+            }
+        }
+        start += PGSIZE;
+    }
+    return 0;
+}
+
 
 
 //lab4 请补充你在lab4中的代码

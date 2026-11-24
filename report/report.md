@@ -39,10 +39,10 @@
 - [x] 修改 `RESTORE_ALL`，支持用户态 / 内核态双向异常返回
 - [x] 功能模块一：用户态系统调用
 - [x] 功能模块二：创建并加载第一个用户进程
-- [ ] 功能模块三：复制用户进程
+- [x] 功能模块三：复制用户进程
 - [ ] 功能模块四：进程退出、让出与终止
 - [x] 用户程序预加载方式分析
-- [ ] Copy on Write / Dirty COW
+- [x] Copy on Write 实现与 Dirty COW 原理分析、写入隔离验证
 - [ ] GDB 系统调用调试
 - [ ] 完成实验代码整合
 - [ ] 完成编译验证
@@ -923,19 +923,87 @@ copy_range()
 
 ### 4.3.3 实现过程
 
-待负责人完成功能后补充。
+`do_fork()` 先检查进程数量和参数，再依次申请 PCB、分配内核栈、调用 `copy_mm()` 准备地址空间，并由 `copy_thread()` 在子进程内核栈顶复制 TrapFrame。准备成功后，函数在关闭中断的临界区内分配 PID、加入哈希表，并调用 `set_links()` 同时维护全局进程链表和父子、兄弟关系，最后将子进程唤醒。父进程得到子 PID，子进程 TrapFrame 中的 a0 被置为 0，符合 fork 的两种返回语义。
+
+`copy_mm()` 将三种情况分开处理：内核线程没有用户 mm，直接保持为空；`CLONE_VM` 共享父进程 mm 并增加引用计数；普通用户进程创建新的 mm 和根页表，在锁定父 mm 后调用 `dup_mmap()`。复制失败时依次撤销已建立的映射、页表和 mm，避免产生半初始化的子进程。
+
+`dup_mmap()` 按父进程 VMA 链表的顺序复制起止地址和访问权限，再对每个区间调用 `copy_range()`。默认 fork 使用 COW：父子进程最初共享物理页；原本可写的页清除 `PTE_W` 并设置软件位 `PTE_COW`，真正只读页面保持只读且不设置 COW。`copy_range()` 同时保留 `share == false` 的深复制路径，用于验证逐页分配、内容复制和页表空洞跳过逻辑。
+
+发生 Store Page Fault 时，异常处理调用 `cow_resolve()`。若 COW 页仍有多个引用，就分配新页、复制内容并替换当前进程映射；若只剩当前进程引用，则直接清除 COW 位、恢复写权限。两条路径都会刷新对应 TLB。内核的 `copy_to_user()` 也逐页检查页表并主动分离 COW，避免内核虚拟地址直接写物理页而绕过只读 PTE。
 
 ---
 
 ### 4.3.4 关键代码
 
-待负责人完成功能后补充。
+```c
+if (clone_flags & CLONE_VM) {
+    mm = oldmm;
+} else {
+    mm = mm_create();
+    setup_pgdir(mm);
+    lock_mm(oldmm);
+    ret = dup_mmap(mm, oldmm);
+    unlock_mm(oldmm);
+}
+mm_count_inc(mm);
+proc->mm = mm;
+proc->pgdir = PADDR(mm->pgdir);
+```
+
+```c
+if (perm & PTE_W)
+    perm = (perm & ~PTE_W) | PTE_COW;
+page_insert(to, page, start, perm);
+*src = pte_create(page2ppn(page), perm);
+tlb_invalidate(from, start);
+```
+
+```c
+if (page_ref(page) == 1) {
+    *ptep = pte_create(page2ppn(page), perm);
+    tlb_invalidate(mm->pgdir, va);
+} else {
+    struct Page *copy = alloc_page();
+    memcpy(page2kva(copy), page2kva(page), PGSIZE);
+    page_insert(mm->pgdir, copy, va, perm);
+}
+```
 
 ---
 
 ### 4.3.5 调用关系
 
-待负责人完成后补充。
+```text
+用户 fork()
+    ↓
+系统调用 sys_fork()
+    ↓
+do_fork()
+    ├─ alloc_proc() / setup_kstack()
+    ├─ copy_mm()
+    │    ├─ CLONE_VM：共享 mm
+    │    └─ 普通 fork：mm_create() → setup_pgdir()
+    │                         ↓
+    │                    dup_mmap()
+    │                         ↓
+    │                    copy_range()
+    │                         ↓
+    │                    建立 COW 映射
+    ├─ copy_thread()
+    └─ hash_proc() / set_links() / wakeup_proc()
+
+用户写 COW 页
+    ↓
+Store Page Fault
+    ↓
+exception_handler()
+    ↓
+cow_resolve()
+    ↓
+复制共享页或恢复独占页写权限
+    ↓
+返回原指令重新执行
+```
 
 ---
 
@@ -951,7 +1019,35 @@ report/prompt.md
 
 ### 4.3.7 测试与验证
 
-待负责人完成后补充。
+在 WSL 中执行专项测试：
+
+```bash
+cd '/mnt/d/360MoveData/Users/huangyihao/Desktop/OS实验/lab5/nku-os/code'
+python3 tools/test_function3.py
+echo $?
+```
+
+测试在自动清理的工程副本中编译和启动 QEMU，实际结果如下：
+
+```text
+[Lab5 F3] eager copy and unmapped hole PASS
+[Lab5 F3] fork tree/trapframe, COW split/exclusive/OOM/read-only PASS
+[Lab5 F3] CLONE_VM, multiple forks and safe kernel writes PASS
+[Lab5 F3] allocation rollback and process limit PASS
+[Lab5 F3] page-table cleanup and baseline free-page count PASS
+[Lab5 F3] real U-mode store fault/retry and parent isolation PASS
+[Lab5 F3] real user fork syscall and both return values PASS
+[Lab5 F3] do_wait status write preserves COW isolation PASS
+[Lab5 F3] ALL TESTS PASS
+```
+
+专项测试返回码为 0，测试结果在终端显示，截图见第 4.5.2 节。测试覆盖深复制、未映射页空洞、父子关系和返回值、COW 引用计数、共享页分离、独占页恢复、内存不足原映射保持、只读页拒绝写入、`CLONE_VM`、多次 fork、失败回滚、页表释放以及真实 U 态写故障后的指令重试。
+
+调试时，AI 生成的缺页分支沿用了旧版 `trapframe` 的字段名 `badvaddr`，导致编译失败。对照本实验的 `trap.h` 和 `SAVE_ALL` 后，改为从 `tf->tval` 读取故障地址。测试中的故障注入也由宽泛字符串替换改成匹配实际分配语句，保留原有内存自检。随后重新运行 QEMU，确认 U 态写缺页后从原指令继续执行。
+
+合入 `42b53c9` 后，`exception_handler()` 保留 `ecall` 分发和 COW 缺页处理。上游的 `sys_fork()` 可直接调用现有 `do_fork()`。`do_wait()` 将退出码写回改为调用 `copy_to_user()`，由它分离 COW 页面并检查目标页是否可写。写回失败时保留子进程的回收记录。
+
+合并后的专项测试使用真实的 `ecall → syscall() → sys_fork() → do_fork()` 路径，检查父进程得到子 PID、子进程现场的 a0 为 0，以及两者从同一条后续指令继续执行所需的 epc。退出码测试在副本里设置僵尸子进程状态，再调用实际 `do_wait()`，验证写回后父进程读到退出码，原共享物理页中的对应位置保持原值。
 
 ---
 
@@ -1156,22 +1252,49 @@ ELF 加载
 
 **负责人：2413581-黄奕浩**
 
-主要任务：
+#### 实现思路
+
+COW 将 fork 时的“立即复制所有物理页”改为“先共享、写入时再复制”。本实现使用 RISC-V PTE 的软件保留位 `PTE_COW` 标记原本可写的私有页。父子 PTE 都清除 `PTE_W`，因此任一进程第一次写入都会触发 Store Page Fault。异常处理确认 VMA 允许写且 PTE 确实带有 COW 标记后才允许分离，普通只读页不会被升级为可写页。
+
+#### 页面状态变化
 
 ```text
-Copy on Write
-Dirty COW
+fork 前：父页 [W=1, COW=0, ref=1]
+    ↓ fork
+fork 后：父页、子页 [W=0, COW=1, ref=2]
+    ↓ 子进程写入
+子页：新物理页 [W=1, COW=0, ref=1]
+父页：原物理页 [W=0, COW=1, ref=1]
+    ↓ 父进程首次写入
+父页：原物理页原地恢复 [W=1, COW=0, ref=1]
 ```
 
-待负责人完成后补充：
+#### Dirty COW 分析与验证
 
-- 实现思路；
-- 修改文件；
-- 关键代码；
-- 页面状态变化；
-- Page Fault 处理；
-- 测试结果；
-- Dirty COW 分析。
+Dirty COW（CVE-2016-5195）源于 Linux 在处理私有只读映射的写时复制时出现竞态。这个案例说明，内核写入路径也必须遵守用户映射的权限和私有性。uCore 的回归检查从合法的共享 COW 映射出发，调用 `copy_to_user()` 写入子进程，再断言父进程与另一子进程的页面保持原值。同时验证真正只读、未映射和越界地址都会被拒绝。Linux 漏洞背景参见 [Dirty COW 项目说明](https://dirtycow.ninja/)。
+
+内核写用户内存时逐页检查 VMA 与 PTE，并在写入前分离 COW。分离过程在单核实验环境的关中断临界区内完成，包括检查引用计数、复制页面和替换 PTE。只读 VMA 与 COW 页使用不同标记，真正只读的页面保留原权限。
+
+跨页写入分为准备和写入两步。`copy_to_user()` 先检查所有目标页、完成 COW 分离，再统一复制数据。若第二页缺失或分配失败，前面的页可能已完成 COW 分离，但目标字节均保留原值。QEMU 新增回归用例分别验证了第二页未映射、第二次 COW 分配失败，以及取消故障注入后重试成功。该回归验证的是 uCore 的跨页写入和父子页隔离，Linux Dirty COW 的竞态在本节作原理分析。
+
+#### 修改文件与测试
+
+用独立状态模型对照写入许可的判断。第一次检查时，版本 1 的映射为私有可写。提交时，模型给出版本 2 的映射，状态已变为共享只读。
+
+| 判断方式 | 模型结果 |
+| --- | --- |
+| 只采用版本 1 的许可 | 错误地判定为允许写入 |
+| 按提交时的版本和权限重新判断 | 拒绝写入，数据保持原值 |
+
+![COW 写入许可失效的状态模型演示](figures/huangyihao-cow-state-model.png)
+
+模型演示的是旧许可为何不能用于已经变化的状态。下面的 QEMU 截图提供 uCore 实际写入隔离和只读保护的测试证据。
+
+主要修改 `kern/mm/mmu.h`、`kern/mm/pmm.c`、`kern/mm/vmm.[ch]`、`kern/process/proc.c` 和 `kern/trap/trap.c`。专项测试验证了 COW 共享与分离、分配失败回滚、只读保护、内核写入路径、真实 U 态 Store Page Fault、原指令重试和父子数据隔离，全部通过；测试输出见 4.3.7。
+
+![Lab5 本地 QEMU 的 COW 状态转换与专项测试结果](figures/huangyihao-lab5-cow-test.png)
+
+图中 fork 后父子共享同一物理页，引用计数为 2，两条映射均为 `W=0, COW=1`。子进程分离后写入 `0x31`，父进程仍读到 `0x21`。父进程之后写入时复用原物理页，恢复为 `W=1, COW=0`。真正只读的页拒绝写入，仍保留 `0x42`。随后通过了真实 U 态写缺页重试和 `do_wait()` 写回隔离检查，终端显示 `ALL TESTS PASS`。这些输出记录的是本地 uCore 的 COW 状态转换与写入保护验证。
 
 ---
 
@@ -1319,7 +1442,7 @@ BSS
 
 ## 5.6 fork
 
-待学习和实验完成后补充。
+fork 建立子进程控制块和内核栈，并通过子进程 TrapFrame 的 a0 实现返回 0。父进程得到子 PID。普通 fork 提供各自独立的内存视图，COW 将物理页复制延迟到发生写入时。
 
 ---
 
@@ -1337,7 +1460,7 @@ BSS
 
 ## 5.9 Copy on Write
 
-待拓展任务完成后补充。
+COW 把进程的逻辑写权限与 PTE 的当前写权限分开。写缺页时，内核结合 VMA、COW 标记和引用计数，决定复制物理页或恢复独占页的写权限。
 
 ---
 
@@ -1415,7 +1538,7 @@ Total Score：
 
 ### Copy on Write / Dirty COW
 
-待完成后填写。
+专项测试通过真实 U 态写缺页、指令重试、父子页面隔离与内核写入保护检查，见 4.5.2。
 
 ### GDB 系统调用调试
 

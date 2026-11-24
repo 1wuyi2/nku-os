@@ -202,7 +202,68 @@ out:
     return ret;
 }
 
-//lab5 function3 YOUR CODE 
+//lab5 function3 2413581
+int dup_mmap(struct mm_struct *to, struct mm_struct *from)
+{
+    assert(to != NULL && from != NULL);
+    list_entry_t *le = &from->mmap_list;
+    while ((le = list_next(le)) != &from->mmap_list)
+    {
+        struct vma_struct *vma = le2vma(le, list_link);
+        struct vma_struct *copy = vma_create(vma->vm_start, vma->vm_end, vma->vm_flags);
+        if (copy == NULL)
+            return -E_NO_MEM;
+        insert_vma_struct(to, copy);
+#ifdef LAB5_EAGER_FORK
+        bool cow = 0;
+#else
+        bool cow = 1;
+#endif
+        int ret = copy_range(to->pgdir, from->pgdir, vma->vm_start, vma->vm_end, cow);
+        if (ret != 0)
+            return ret;
+    }
+    return 0;
+}
+
+int cow_resolve(struct mm_struct *mm, uintptr_t addr)
+{
+    if (mm == NULL) return -E_FAULT;
+    struct vma_struct *vma = find_vma(mm, addr);
+    if (vma == NULL || !(vma->vm_flags & VM_WRITE)) return -E_FAULT;
+    uintptr_t va = ROUNDDOWN(addr, PGSIZE);
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    int ret = -E_FAULT;
+    pte_t *ptep = get_pte(mm->pgdir, va, 0);
+    if (ptep == NULL || (*ptep & (PTE_V | PTE_U | PTE_R | PTE_COW | PTE_W)) !=
+                        (PTE_V | PTE_U | PTE_R | PTE_COW))
+        goto out;
+    struct Page *page = pte2page(*ptep);
+    uint32_t perm = ((*ptep & 0x3ff) | PTE_W | PTE_A | PTE_D) & ~PTE_COW;
+    if (page_ref(page) == 1)
+    {
+        *ptep = pte_create(page2ppn(page), perm);
+        tlb_invalidate(mm->pgdir, va);
+        ret = 0;
+    }
+    else
+    {
+        struct Page *copy = alloc_page();
+        if (copy == NULL)
+        {
+            ret = -E_NO_MEM;
+            goto out;
+        }
+        memcpy(page2kva(copy), page2kva(page), PGSIZE);
+        ret = page_insert(mm->pgdir, copy, va, perm);
+        if (ret != 0) free_page(copy);
+    }
+out:
+    local_intr_restore(intr_flag);
+    return ret;
+}
+
 
 
 
@@ -235,12 +296,43 @@ bool copy_from_user(struct mm_struct *mm, void *dst, const void *src, size_t len
 
 bool copy_to_user(struct mm_struct *mm, void *dst, const void *src, size_t len)
 {
-    if (!user_mem_check(mm, (uintptr_t)dst, len, 1))
+    if (!user_mem_check(mm, (uintptr_t)dst, len, 1)) return 0;
+    if (mm == NULL)
     {
-        return 0;
+        memcpy(dst, src, len);
+        return 1;
     }
-    memcpy(dst, src, len);
-    return 1;
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    bool ok = 0;
+    uintptr_t start = (uintptr_t)dst, end = start + len;
+    /* Resolve every target mapping before changing any destination bytes. */
+    for (uintptr_t va = start; va < end; va = ROUNDDOWN(va, PGSIZE) + PGSIZE)
+    {
+        pte_t *ptep = get_pte(mm->pgdir, va, 0);
+        if (ptep == NULL || !(*ptep & PTE_V) || !(*ptep & PTE_U)) goto out;
+        if (*ptep & PTE_COW)
+        {
+            if (cow_resolve(mm, va) != 0) goto out;
+            ptep = get_pte(mm->pgdir, va, 0);
+        }
+        if (!(*ptep & PTE_W)) goto out;
+    }
+    uintptr_t va = start;
+    const char *source = src;
+    while (va < end)
+    {
+        pte_t *ptep = get_pte(mm->pgdir, va, 0);
+        size_t count = PGSIZE - PGOFF(va);
+        if (count > end - va) count = end - va;
+        memcpy((char *)page2kva(pte2page(*ptep)) + PGOFF(va), source, count);
+        source += count;
+        va += count;
+    }
+    ok = 1;
+out:
+    local_intr_restore(intr_flag);
+    return ok;
 }
 
 // vmm_init - initialize virtual memory management

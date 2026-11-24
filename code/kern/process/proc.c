@@ -316,16 +316,44 @@ put_pgdir(struct mm_struct *mm)
     free_page(kva2page(mm->pgdir));
 }
 
-//lab5 function3 YOUR CODE update copy_mm
+//lab5 function3 2413581 update copy_mm
 static int
 copy_mm(uint32_t clone_flags, struct proc_struct *proc)
 {
-    if (current->mm != NULL)
+    struct mm_struct *oldmm = current->mm, *mm = NULL;
+    int ret;
+    if (oldmm == NULL)
     {
-        return -E_INVAL;
+        proc->mm = NULL;
+        return 0;
     }
-    proc->mm = NULL;
+    if (clone_flags & CLONE_VM)
+    {
+        mm = oldmm;
+    }
+    else
+    {
+        if ((mm = mm_create()) == NULL)
+            return -E_NO_MEM;
+        if ((ret = setup_pgdir(mm)) != 0)
+            goto bad_mm;
+        lock_mm(oldmm);
+        ret = dup_mmap(mm, oldmm);
+        unlock_mm(oldmm);
+        if (ret != 0)
+        {
+            exit_mmap(mm);
+            put_pgdir(mm);
+            goto bad_mm;
+        }
+    }
+    mm_count_inc(mm);
+    proc->mm = mm;
+    proc->pgdir = PADDR(mm->pgdir);
     return 0;
+bad_mm:
+    mm_destroy(mm);
+    return ret;
 }
 
 
@@ -343,7 +371,7 @@ copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf)
 }
 
 
-//lab5 function3 YOUR CODE
+//lab5 function3 2413581
 int
 do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
 {
@@ -373,13 +401,16 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
     {
         goto bad_fork_cleanup_kstack;
     }
+    if (stack == 0 && !trap_in_kernel(tf))
+    {
+        stack = tf->gpr.sp;
+    }
     copy_thread(proc, stack, tf);
 
     local_intr_save(intr_flag);
     proc->pid = get_pid();
     hash_proc(proc);
-    list_add(&proc_list, &proc->list_link);
-    nr_process++;
+    set_links(proc);
     wakeup_proc(proc);
     local_intr_restore(intr_flag);
     return proc->pid;
@@ -728,7 +759,10 @@ found:
     }
     if (code_store != NULL)
     {
-        *code_store = proc->exit_code;
+        if (!copy_to_user(current->mm, code_store, &proc->exit_code, sizeof(int)))
+        {
+            return -E_INVAL;
+        }
     }
 
     local_intr_save(intr_flag);
